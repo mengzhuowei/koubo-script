@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ article.title }} · AI效率教练{% endblock %}
+{% block content %}
+<a class="link" href="/articles">← 返回文章池</a>
+<h1 class="page-title">{{ article.title }}</h1>
+
+<div class="panel">
+  <div class="panel-body">
+    <div class="muted" style="margin-bottom:8px">
+      来源：{{ article.source_name or '-' }} ｜
+      作者：{{ article.author or '-' }} ｜
+      发布：{{ article.published_at or '-' }} ｜
+      抓取：{{ article.fetched_at }}
+    </div>
+    <div class="muted" style="margin-bottom:12px">
+      <a href="{{ article.url }}" target="_blank" rel="noopener">{{ article.url }}</a>
+      {% if article.canonical_url and article.canonical_url != article.url %}
+      ｜ canonical：{{ article.canonical_url }}
+      {% endif %}
+    </div>
+    <div class="muted" style="margin-bottom:8px">状态：
+      <span class="tag tag-{{ article.status }}">{{ article.status }}</span>
+      ｜ 语言：{{ article.language or '-' }}
+    </div>
+
+    {% if article.summary %}
+    <h3 style="margin-top:16px">摘要</h3>
+    <pre class="body-text">{{ article.summary }}</pre>
+    {% endif %}
+
+    <h3 style="margin-top:16px">正文</h3>
+    <pre class="body-text">{{ article.content_text or '（无正文）' }}</pre>
+
+    <div class="form-inline" style="margin-top:16px">
+      {% if article.status != 'ignored' %}
+      <form method="post" action="/articles/{{ article.id }}/ignore" style="display:inline">
+        <button class="btn btn-danger" type="submit">标记为忽略</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <details style="margin-top:16px">
+      <summary class="link">加入已有选题</summary>
+      <form class="form-inline" method="post" action="/articles/{{ article.id }}/add-to-topic" style="margin-top:8px">
+        <input type="number" name="topic_id" placeholder="选题 ID" required>
+        <button class="btn btn-primary" type="submit">加入选题</button>
+      </form>
+    </details>
+  </div>
+</div>
+{% endblock %}

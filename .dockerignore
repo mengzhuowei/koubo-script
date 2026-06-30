@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# 本地数据与配置（容器内重新生成或通过卷挂载）
+data/
+.env
+.env.local
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Git / IDE
+.git/
+.gitignore
+.idea/
+.vscode/
+*.swp
+
+# 文档与临时文件
+docs/
+*.md
+!prompts/*.md
+_check_jobs.py

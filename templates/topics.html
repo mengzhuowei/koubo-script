@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}选题库 · AI效率教练{% endblock %}
+{% block content %}
+<div class="panel-head" style="border:none">
+  <h1 class="page-title" style="margin:0">选题库</h1>
+  <form method="post" action="/topics/generate" style="display:inline">
+    <button class="btn btn-primary" type="submit">生成今日选题</button>
+  </form>
+</div>
+
+<form class="filter-bar" method="get" action="/topics">
+  <select name="status">
+    <option value="">全部状态</option>
+    {% for s in ['new', 'selected', 'scripted', 'archived'] %}
+    <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <select name="category">
+    <option value="">全部栏目</option>
+    {% for c in ['AI效率快报', '一人工作流', 'Agent实战课', '避坑诊断室', '前沿变白话'] %}
+    <option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn btn-primary" type="submit">筛选</button>
+  <a class="btn" href="/topics">重置</a>
+</form>
+
+<section class="panel">
+  {% if topics %}
+  <table class="table">
+    <thead>
+      <tr><th>分数</th><th>标题</th><th>栏目</th><th>平台</th><th>时长</th><th>状态</th><th>操作</th></tr>
+    </thead>
+    <tbody>
+    {% for t in topics %}
+      <tr>
+        <td><span class="score">{{ t.score }}</span></td>
+        <td><a href="/topics/{{ t.id }}">{{ t.title }}</a></td>
+        <td>{{ t.recommended_column or t.category or '-' }}</td>
+        <td>{{ t.recommended_platform or '-' }}</td>
+        <td>{{ t.recommended_duration or '-' }}</td>
+        <td><span class="tag tag-{{ t.status }}">{{ t.status }}</span></td>
+        <td class="form-inline">
+          <a class="btn btn-sm" href="/topics/{{ t.id }}">详情</a>
+          <a class="btn btn-sm btn-primary" href="/topics/{{ t.id }}/scripts">写脚本</a>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">暂无选题。先抓取来源文章，再点击“生成今日选题”。</div>
+  {% endif %}
+</section>
+{% endblock %}

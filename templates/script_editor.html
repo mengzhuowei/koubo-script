@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}脚本编辑 · {{ topic.title }}{% endblock %}
+{% block content %}
+<a class="link" href="/topics/{{ topic.id }}">← 返回选题</a>
+<h1 class="page-title">脚本编辑 · {{ topic.title }}</h1>
+
+<section class="panel">
+  <div class="panel-head"><h2>生成新脚本</h2></div>
+  <form class="form" method="post" action="/topics/{{ topic.id }}/scripts">
+    <div class="form-row">
+      <label>平台</label>
+      <select name="platform">
+        <option value="douyin">抖音</option>
+        <option value="xiaohongshu">小红书</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>模板</label>
+      <select name="format">
+        <option value="热点解读">热点解读</option>
+        <option value="工具教程">工具教程</option>
+        <option value="观点拆解">观点拆解</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>时长（秒）</label>
+      <select name="duration">
+        <option value="60">60</option>
+        <option value="90" selected>90</option>
+        <option value="180">180</option>
+      </select>
+    </div>
+    <div class="muted">生成会作为后台任务执行，完成后在下方列表查看。</div>
+    <button class="btn btn-primary" type="submit">生成脚本</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>脚本版本</h2></div>
+  {% if scripts %}
+  {% for s in scripts %}
+  <details class="panel-body" {% if loop.first %}open{% endif %} style="border-top:1px solid var(--border)">
+    <summary>
+      <strong>v{{ s.version }}</strong> · {{ s.platform }} · {{ s.format }} · {{ s.duration }}s
+      <span class="muted">（{{ s.updated_at }}）</span>
+    </summary>
+    <form class="form" method="post" action="/scripts/{{ s.id }}" style="margin-top:8px">
+      <div class="form-row">
+        <label>标题</label>
+        <input type="text" name="title" value="{{ s.title or '' }}">
+      </div>
+      <div class="form-row">
+        <label>开头钩子</label>
+        <textarea name="hook" rows="2">{{ s.hook or '' }}</textarea>
+      </div>
+      <div class="form-row">
+        <label>正文</label>
+        <textarea name="body" rows="14" required>{{ s.body }}</textarea>
+      </div>
+      <div class="form-row">
+        <label>CTA</label>
+        <textarea name="cta" rows="2">{{ s.cta or '' }}</textarea>
+      </div>
+      <div class="form-row">
+        <label>封面文案</label>
+        <input type="text" name="cover_text" value="{{ s.cover_text or '' }}">
+      </div>
+      <div class="form-row">
+        <label>简介</label>
+        <textarea name="description" rows="2">{{ s.description or '' }}</textarea>
+      </div>
+      <div class="form-row">
+        <label>话题标签（逗号或换行分隔）</label>
+        <textarea name="hashtags" rows="2">{{ s.hashtags_list|join(',') }}</textarea>
+      </div>
+      <button class="btn btn-primary" type="submit">保存修改</button>
+    </form>
+  </details>
+  {% endfor %}
+  {% else %}
+  <div class="empty">暂无脚本，先在上方生成。</div>
+  {% endif %}
+</section>
+{% endblock %}

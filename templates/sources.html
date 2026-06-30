@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}来源库 · AI效率教练{% endblock %}
+{% block content %}
+<div class="panel-head" style="border:none">
+  <h1 class="page-title" style="margin:0">来源库</h1>
+  <a class="btn btn-primary" href="/sources/new">+ 新增来源</a>
+</div>
+
+<form method="post" action="/sources/fetch-all" style="margin:8px 0 16px">
+  <button class="btn" type="submit">抓取全部启用来源</button>
+</form>
+
+<section class="panel">
+  {% if sources %}
+  <table class="table">
+    <thead>
+      <tr><th>层级</th><th>名称</th><th>类型</th><th>URL</th><th>关键词</th><th>启用</th><th>最后抓取</th><th>错误</th><th>操作</th></tr>
+    </thead>
+    <tbody>
+    {% for s in sources %}
+      <tr>
+        <td><span class="badge-level badge-level-{{ s.level }}">{{ s.level }}</span></td>
+        <td>{{ s.name }}</td>
+        <td><code>{{ s.type }}</code></td>
+        <td><a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.url[:48] }}{% if s.url|length > 48 %}…{% endif %}</a></td>
+        <td class="muted">{{ s.keywords or '-' }}</td>
+        <td>
+          <form method="post" action="/sources/{{ s.id }}/toggle" style="display:inline">
+            <button class="btn btn-sm {% if s.enabled %}btn-primary{% endif %}" type="submit">
+              {% if s.enabled %}启用{% else %}停用{% endif %}
+            </button>
+          </form>
+        </td>
+        <td class="muted">{{ s.last_fetched_at or '-' }}</td>
+        <td class="muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">{{ s.last_error or '-' }}</td>
+        <td class="form-inline">
+          <form method="post" action="/sources/{{ s.id }}/fetch" style="display:inline">
+            <button class="btn btn-sm" type="submit">抓取</button>
+          </form>
+          <a class="btn btn-sm" href="/sources/{{ s.id }}/edit">编辑</a>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">暂无来源，点击右上角“新增来源”开始添加。</div>
+  {% endif %}
+</section>
+{% endblock %}
