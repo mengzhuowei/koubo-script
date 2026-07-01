@@ -1,0 +1,31 @@
+{# 任务表格片段：可被 jobs.html include，也可被 /jobs?partial=1 单独返回 #}
+{% if jobs %}
+<table class="table">
+  <thead>
+    <tr><th>ID</th><th>类型</th><th>状态</th><th>尝试</th><th>载荷</th><th>开始</th><th>完成</th><th>错误</th><th>操作</th></tr>
+  </thead>
+  <tbody>
+  {% for j in jobs %}
+    <tr>
+      <td>{{ j.id }}</td>
+      <td><code>{{ j.type }}</code></td>
+      <td><span class="tag tag-{{ j.status }}">{{ j.status }}</span></td>
+      <td>{{ j.attempts }}/{{ j.max_attempts }}</td>
+      <td class="muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">{{ j.payload_json or '-' }}</td>
+      <td class="muted">{{ j.started_at or '-' }}</td>
+      <td class="muted">{{ j.finished_at or '-' }}</td>
+      <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis" title="{{ j.error or '' }}">{{ j.error or '-' }}</td>
+      <td>
+        {% if j.status in ('failed', 'pending') %}
+        <form method="post" action="/jobs/{{ j.id }}/retry" style="display:inline">
+          <button class="btn btn-sm" type="submit">重试</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">暂无任务。去首页或来源库触发抓取与生成。</div>
+{% endif %}
