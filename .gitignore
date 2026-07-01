@@ -31,6 +31,8 @@ _*.py
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+*_dump.sql
+*.bak
 
 # ---------- IDE / 编辑器 ----------
 .idea/

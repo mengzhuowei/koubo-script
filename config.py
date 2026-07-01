@@ -13,8 +13,11 @@ class Settings(BaseSettings):
     app_port: int = 8000
 
     # MySQL 连接配置
+    # 连接目标：本地 127.0.0.1，Docker compose 内为 mysql；端口固定 3306
     db_host: str = "127.0.0.1"
     db_port: int = 3306
+    # 凭据/库名：与 docker-compose.yml 的 MySQL 容器初始化参数共用一套
+    # （DB_USER / DB_PASSWORD / DB_NAME），避免重复配置
     db_user: str = "koubo"
     db_password: str = "koubo"
     db_name: str = "koubo"

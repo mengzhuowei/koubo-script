@@ -687,17 +687,14 @@ APP_ENV=development
 APP_HOST=127.0.0.1
 APP_PORT=8000
 
-# MySQL
+# MySQL（凭据/库名共用一套：Docker 容器初始化 + 应用连接）
 DB_HOST=127.0.0.1
 DB_PORT=3306
+DB_NAME=koubo
 DB_USER=koubo
 DB_PASSWORD=koubo
-DB_NAME=koubo
-# 仅 Docker compose 使用：MySQL 容器初始化参数
-MYSQL_ROOT_PASSWORD=rootpass
-MYSQL_DATABASE=koubo
-MYSQL_USER=koubo
-MYSQL_PASSWORD=koubo
+# 仅 Docker 容器初始化使用：root 密码与应用用户分开
+DB_ROOT_PASSWORD=rootpass
 
 OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.openai.com/v1
@@ -712,7 +709,7 @@ LOG_LEVEL=INFO
 说明：
 
 1. DEFAULT_LLM_PROVIDER 和 DEFAULT_LLM_MODEL 只用于首次初始化 llm_settings。应用运行后以页面保存的模型配置为准。
-2. Docker 运行时 compose 会自动覆盖 DB_HOST=mysql，并通过 MYSQL_DATABASE 让 MySQL 容器首次启动自动建库。
+2. Docker 运行时 compose 会自动覆盖 DB_HOST=mysql，并通过 DB_NAME 让 MySQL 容器首次启动自动建库。
 3. 本地运行需先手动创建数据库：`CREATE DATABASE koubo CHARACTER SET utf8mb4;` 并建用户授权。
 
 ## 12. 错误处理
