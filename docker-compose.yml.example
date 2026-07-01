@@ -22,11 +22,12 @@ services:
       APP_PORT: "8000"
       # 访问宿主机上的 MySQL：Docker Desktop (Windows/Mac) 自带 host.docker.internal 解析
       # Linux 上需额外加 extra_hosts（见下方）把 host-gateway 映射到 host.docker.internal
-      DB_HOST: host.docker.internal
-      DB_PORT: "3306"
-      DB_USER: ${MYSQL_USER:-koubo}
-      DB_PASSWORD: ${MYSQL_PASSWORD:-koubo}
-      DB_NAME: ${MYSQL_DATABASE:-koubo}
+      # 可在 .env 里用 DB_HOST 覆盖（如 DB_HOST=mysql 走另一个容器 / DB_HOST=192.168.1.100 走远端）
+      DB_HOST: ${DB_HOST:-host.docker.internal}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-koubo}
+      DB_PASSWORD: ${DB_PASSWORD:-koubo}
+      DB_NAME: ${DB_NAME:-koubo}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       DEFAULT_LLM_PROVIDER: ${DEFAULT_LLM_PROVIDER:-openai}
