@@ -53,3 +53,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    # app 与外部 MySQL 容器共享同一网络（koubo-net），通过容器名/服务名直接解析
+    networks:
+      - koubo-net
+
+# 显式网络：name 固定，多个 compose 共用同一网络
+networks:
+  koubo-net:
+    name: koubo-net
+    driver: bridge
