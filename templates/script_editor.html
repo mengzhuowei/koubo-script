@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}脚本编辑 · {{ topic.title }}{% endblock %}
+{% block content %}
+<a class="link" href="/topics/{{ topic.id }}">← 返回选题</a>
+<h1 class="page-title">脚本编辑 · {{ topic.title }}</h1>
+
+<section class="panel">
+  <div class="panel-head"><h2>生成新脚本</h2></div>
+  <form class="form" method="post" action="/topics/{{ topic.id }}/scripts">
+    <div class="form-row">
+      <label>平台</label>
+      <select name="platform">
+        <option value="douyin">抖音</option>
+        <option value="xiaohongshu">小红书</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>模板</label>
+      <select name="format">
+        <option value="热点解读">热点解读</option>
+        <option value="工具教程">工具教程</option>
+        <option value="观点拆解">观点拆解</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>时长（秒）</label>
+      <select name="duration">
+        <option value="60">60</option>
+        <option value="90" selected>90</option>
+        <option value="180">180</option>
+      </select>
+    </div>
+    <div class="muted">生成会作为后台任务执行，下方会显示进度，完成后自动刷新脚本列表。</div>
+    <button class="btn btn-primary" type="submit">生成脚本</button>
+  </form>
+</section>
+
+<section class="panel" id="gen-progress" style="display:none">
+  <div class="panel-head"><h2>生成进度</h2></div>
+  <div class="panel-body" id="gen-progress-body"></div>
+</section>
+
+<section class="panel" id="scripts-section">
+  <div class="panel-head"><h2>脚本版本</h2>
+    {% if scripts|length >= 2 %}<a class="link" href="/topics/{{ topic.id }}/scripts/compare" style="font-size:.9em">版本对比 →</a>{% endif %}
+  </div>
+  {% if scripts %}
+  {% for s in scripts %}
+  <details class="panel-body" {% if loop.first %}open{% endif %} style="border-top:1px solid var(--border)">
+    <summary>
+      <strong>v{{ s.version }}</strong> · {{ s.platform }} · {{ s.format }} · {{ s.duration }}s
+      <span class="muted">（{{ s.updated_at }}）</span>
+    </summary>
+    <form class="form" method="post" action="/scripts/{{ s.id }}" style="margin-top:8px">
+      <div class="form-row">
+        <label>标题</label>
+        <input type="text" name="title" value="{{ s.title or '' }}">
+      </div>
+      <div class="form-row">
+        <label>开头钩子</label>
+        <textarea name="hook" rows="2">{{ s.hook or '' }}</textarea>
+      </div>
+      <div class="form-row">
+        <label>正文</label>
+        <textarea name="body" rows="14" required>{{ s.body }}</textarea>
+      </div>
+      <div class="form-row">
+        <label>CTA</label>
+        <textarea name="cta" rows="2">{{ s.cta or '' }}</textarea>
+      </div>
+      <div class="form-row">
+        <label>封面文案</label>
+        <input type="text" name="cover_text" value="{{ s.cover_text or '' }}">
+      </div>
+      <div class="form-row">
+        <label>简介</label>
+        <textarea name="description" rows="2">{{ s.description or '' }}</textarea>
+      </div>
+      <div class="form-row">
+        <label>话题标签（逗号或换行分隔）</label>
+        <textarea name="hashtags" rows="2">{{ s.hashtags_list|join(',') }}</textarea>
+      </div>
+      <button class="btn btn-primary" type="submit">保存修改</button>
+    </form>
+
+    {% set assets = assets_map[s.id] %}
+    <div style="border-top:1px dashed var(--border); margin-top:12px; padding-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong>发布素材包</strong>
+        <form method="post" action="/scripts/{{ s.id }}/assets" style="margin:0">
+          <button class="btn btn-primary" type="submit">生成素材包</button>
+        </form>
+      </div>
+      {% if assets %}
+      <div class="muted" style="margin-bottom:6px">最近生成：{{ assets.updated_at }}</div>
+      {% if assets.titles_list %}
+      <div style="margin:4px 0"><span class="muted">视频标题：</span>{{ assets.titles_list|join(' / ') }}</div>
+      {% endif %}
+      {% if assets.cover_texts_list %}
+      <div style="margin:4px 0"><span class="muted">封面文案：</span>{{ assets.cover_texts_list|join(' / ') }}</div>
+      {% endif %}
+      {% if assets.description %}
+      <div style="margin:4px 0"><span class="muted">简介：</span>{{ assets.description }}</div>
+      {% endif %}
+      {% if assets.hashtags_list %}
+      <div style="margin:4px 0"><span class="muted">话题标签：</span>
+        {% for t in assets.hashtags_list %}#{{ t }} {% endfor %}
+      </div>
+      {% endif %}
+      {% if assets.comment_questions_list %}
+      <div style="margin:4px 0"><span class="muted">评论引导：</span>
+        <ol style="margin:4px 0 0 18px;padding:0">
+        {% for q in assets.comment_questions_list %}<li>{{ q }}</li>{% endfor %}
+        </ol>
+      </div>
+      {% endif %}
+      {% if assets.pinned_comment %}
+      <div style="margin:4px 0"><span class="muted">置顶评论：</span>{{ assets.pinned_comment }}</div>
+      {% endif %}
+      {% else %}
+      <div class="muted">尚未生成，点击右侧按钮生成（消耗 LLM）。</div>
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
+  {% else %}
+  <div class="empty">暂无脚本，先在上方生成。</div>
+  {% endif %}
+</section>
+
+<script>
+(function () {
+  // 从 URL ?job=xxx 读取要跟踪的 job_id（由生成脚本/素材包 POST 后带过来）
+  var params = new URLSearchParams(location.search);
+  var jobId = params.get('job');
+  if (!jobId) return;
+
+  var box = document.getElementById('gen-progress');
+  var body = document.getElementById('gen-progress-body');
+  var scriptsSection = document.getElementById('scripts-section');
+  box.style.display = '';
+
+  var STATUS_TEXT = {
+    pending: '排队中…（前方还有任务）',
+    running: 'LLM 调用中…通常需 10-30 秒',
+    done: '完成 ✓',
+    failed: '失败 ✗',
+    not_found: '任务不存在'
+  };
+
+  function typeLabel(t) {
+    return t === 'generate_assets' ? '发布素材包' : (t === 'generate_script' ? '口播脚本' : '任务');
+  }
+
+  function render(info) {
+    var st = info.status;
+    var label = info.type ? typeLabel(info.type) : '';
+    var html = '<div style="font-size:15px;margin-bottom:6px">' +
+      '<span class="tag tag-' + st + '">' + st + '</span> ' +
+      (label ? '<strong>' + label + '</strong> ' : '') +
+      '<span>' + (STATUS_TEXT[st] || st) + '</span></div>';
+    if (st === 'running' || st === 'pending') {
+      html += '<div class="muted">已等待 ' + Math.max(0, Math.floor((Date.now() - startTime) / 1000)) + ' 秒';
+      if (info.attempts > 0) html += '（第 ' + (info.attempts + 1) + ' 次尝试，最多 ' + info.max_attempts + ' 次）';
+      html += '</div>';
+    }
+    if (st === 'failed' && info.error) {
+      html += '<div class="muted" style="margin-top:6px;white-space:pre-wrap;max-height:120px;overflow:auto;background:#fff5f5;padding:8px;border-radius:4px">' + info.error + '</div>';
+    }
+    body.innerHTML = html;
+    return st;
+  }
+
+  var startTime = Date.now();
+  var timer = null;
+
+  function poll() {
+    fetch('/jobs/' + jobId + '/status').then(function (r) { return r.json(); }).then(function (info) {
+      var st = render(info);
+      if (st === 'done') {
+        clearInterval(timer);
+        // 自动刷新脚本列表区，把新生成的脚本加载进来
+        fetch(location.pathname).then(function (r) { return r.text(); }).then(function (html) {
+          var doc = new DOMParser().parseFromString(html, 'text/html');
+          var fresh = doc.getElementById('scripts-section');
+          if (fresh) scriptsSection.innerHTML = fresh.innerHTML;
+        });
+        // 3 秒后收起进度提示
+        setTimeout(function () { box.style.display = 'none'; }, 3000);
+      } else if (st === 'failed' || st === 'not_found') {
+        clearInterval(timer);
+      }
+    }).catch(function () { /* 网络抖动忽略 */ });
+  }
+
+  render({status: 'pending', type: '', attempts: 0, max_attempts: 3});
+  poll();
+  timer = setInterval(poll, 2000);
+})();
+</script>
+{% endblock %}
