@@ -143,6 +143,26 @@ a:hover { text-decoration: underline; }
 
 .link { font-size: 13px; }
 
+/* 脚本版本对比 diff */
+.diff {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  padding: 12px;
+  background: #fafbfc;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 560px;
+  overflow: auto;
+}
+.diff-add { color: #1a7f37; background: #e6ffed; display: block; }
+.diff-del { color: #cf222e; background: #ffeef0; display: block; }
+.diff-hunk { color: #0969da; display: block; }
+.diff-ctx { color: #57606a; display: block; }
+
 .form { padding: 16px; display: grid; gap: 12px; max-width: 640px; }
 .form-row { display: grid; gap: 4px; }
 .form-row label { font-size: 13px; color: var(--muted); }

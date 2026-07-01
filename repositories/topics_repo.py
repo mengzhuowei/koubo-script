@@ -22,7 +22,7 @@ def create_topic(*, title: str, one_line_takeaway: str, summary: str, category: 
                (title, one_line_takeaway, summary, category, audience, recommended_column,
                 recommended_platform, recommended_duration, score, source_level,
                 actionable_value, risk_notes, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'new')""",
             (title, one_line_takeaway, summary, category,
              json.dumps(audience, ensure_ascii=False) if audience else None,
              recommended_column, recommended_platform, recommended_duration, score,
@@ -37,7 +37,7 @@ def add_topic_fact(topic_id: int, claim: str, source_url: str, confidence: str =
     conn = get_conn()
     try:
         conn.execute(
-            "INSERT INTO topic_facts (topic_id, claim, source_url, confidence) VALUES (?, ?, ?, ?)",
+            "INSERT INTO topic_facts (topic_id, claim, source_url, confidence) VALUES (%s, %s, %s, %s)",
             (topic_id, claim, source_url, confidence),
         )
     finally:
@@ -48,7 +48,7 @@ def link_article(topic_id: int, article_id: int) -> None:
     conn = get_conn()
     try:
         conn.execute(
-            "INSERT OR IGNORE INTO topic_articles (topic_id, article_id) VALUES (?, ?)",
+            "INSERT IGNORE INTO topic_articles (topic_id, article_id) VALUES (%s, %s)",
             (topic_id, article_id),
         )
     finally:
@@ -63,7 +63,7 @@ def update_score(topic_id: int, score: int) -> None:
     conn = get_conn()
     try:
         conn.execute(
-            "UPDATE topics SET score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE topics SET score = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
             (int(score), topic_id),
         )
     finally:
@@ -74,7 +74,7 @@ def set_topic_status(topic_id: int, status: str) -> None:
     conn = get_conn()
     try:
         conn.execute(
-            "UPDATE topics SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE topics SET status = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
             (status, topic_id),
         )
     finally:
@@ -85,12 +85,12 @@ def list_topics(*, status: str = "", category: str = "", limit: int = 200) -> li
     sql = "SELECT * FROM topics WHERE 1=1"
     params: list = []
     if status:
-        sql += " AND status = ?"
+        sql += " AND status = %s"
         params.append(status)
     if category:
-        sql += " AND (recommended_column = ? OR category = ?)"
+        sql += " AND (recommended_column = %s OR category = %s)"
         params += [category, category]
-    sql += " ORDER BY score DESC, id DESC LIMIT ?"
+    sql += " ORDER BY score DESC, id DESC LIMIT %s"
     params.append(limit)
     conn = get_conn()
     try:
@@ -103,7 +103,7 @@ def list_top_topics(limit: int = 10) -> list[dict]:
     conn = get_conn()
     try:
         rows = conn.execute(
-            "SELECT * FROM topics ORDER BY score DESC, id DESC LIMIT ?", (limit,)
+            "SELECT * FROM topics ORDER BY score DESC, id DESC LIMIT %s", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -113,7 +113,7 @@ def list_top_topics(limit: int = 10) -> list[dict]:
 def get_topic(topic_id: int) -> dict | None:
     conn = get_conn()
     try:
-        return _row(conn.execute("SELECT * FROM topics WHERE id = ?", (topic_id,)).fetchone())
+        return _row(conn.execute("SELECT * FROM topics WHERE id = %s", (topic_id,)).fetchone())
     finally:
         conn.close()
 
@@ -122,7 +122,7 @@ def get_topic_facts(topic_id: int) -> list[dict]:
     conn = get_conn()
     try:
         return [dict(r) for r in conn.execute(
-            "SELECT * FROM topic_facts WHERE topic_id = ? ORDER BY id ASC", (topic_id,)
+            "SELECT * FROM topic_facts WHERE topic_id = %s ORDER BY id ASC", (topic_id,)
         ).fetchall()]
     finally:
         conn.close()
@@ -133,7 +133,7 @@ def get_topic_articles(topic_id: int) -> list[dict]:
     try:
         rows = conn.execute(
             "SELECT a.* FROM topic_articles ta JOIN articles a ON ta.article_id = a.id "
-            "WHERE ta.topic_id = ? ORDER BY a.id ASC",
+            "WHERE ta.topic_id = %s ORDER BY a.id ASC",
             (topic_id,),
         ).fetchall()
         return [dict(r) for r in rows]
@@ -162,8 +162,23 @@ def count_topics_today() -> int:
     conn = get_conn()
     try:
         r = conn.execute(
-            "SELECT COUNT(*) AS c FROM topics WHERE substr(created_at, 1, 10) = ?", (today,)
+            "SELECT COUNT(*) AS c FROM topics WHERE DATE(created_at) = %s", (today,)
         ).fetchone()
         return r["c"] if r else 0
+    finally:
+        conn.close()
+
+
+def list_recent_topic_titles(days: int = 7, limit: int = 500) -> list[dict]:
+    """返回最近 N 天内非 archived 选题的 id 与 title，供生成时去重比对。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, title FROM topics "
+            "WHERE status != 'archived' AND created_at >= DATE_SUB(NOW(), INTERVAL %s DAY) "
+            "ORDER BY id DESC LIMIT %s",
+            (days, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}来源库 · AI效率教练{% endblock %}
+{% block title %}来源库 · 口播雷达{% endblock %}
 {% block content %}
 <div class="panel-head" style="border:none">
   <h1 class="page-title" style="margin:0">来源库</h1>
@@ -22,17 +22,17 @@
         <td><span class="badge-level badge-level-{{ s.level }}">{{ s.level }}</span></td>
         <td>{{ s.name }}</td>
         <td><code>{{ s.type }}</code></td>
-        <td><a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.url[:48] }}{% if s.url|length > 48 %}…{% endif %}</a></td>
-        <td class="muted">{{ s.keywords or '-' }}</td>
+        <td style="max-width:220px;word-break:break-all"><a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.url[:48] }}{% if s.url|length > 48 %}…{% endif %}</a></td>
+        <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ s.keywords or '' }}">{{ s.keywords or '-' }}</td>
         <td>
           <form method="post" action="/sources/{{ s.id }}/toggle" style="display:inline">
             <button class="btn btn-sm {% if s.enabled %}btn-primary{% endif %}" type="submit">
-              {% if s.enabled %}启用{% else %}停用{% endif %}
+              {% if s.enabled %}停用{% else %}启用{% endif %}
             </button>
           </form>
         </td>
         <td class="muted">{{ s.last_fetched_at or '-' }}</td>
-        <td class="muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">{{ s.last_error or '-' }}</td>
+        <td class="muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ s.last_error or '' }}">{{ s.last_error or '-' }}</td>
         <td class="form-inline">
           <form method="post" action="/sources/{{ s.id }}/fetch" style="display:inline">
             <button class="btn btn-sm" type="submit">抓取</button>

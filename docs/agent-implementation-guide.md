@@ -40,7 +40,7 @@ http://127.0.0.1:8000
 
 1. FastAPI
 2. Jinja2
-3. SQLite
+3. MySQL 8.0（通过 pymysql + DictCursor 访问）
 4. Python 标准线程或简单 worker loop
 5. 普通 CSS
 6. requests/feedparser/trafilatura/BeautifulSoup 组合做抓取和正文提取
@@ -50,11 +50,12 @@ http://127.0.0.1:8000
 1. HTMX，用于局部刷新。
 2. APScheduler，用于后续定时创建任务。
 3. python-dotenv 或 pydantic-settings，用于配置。
+4. Docker + docker-compose，用于一键启动 app + mysql。
 
 不要使用：
 
 1. React、Vue、Next.js。
-2. PostgreSQL、MySQL、MongoDB。
+2. PostgreSQL、MongoDB。
 3. Redis、Celery、RQ。
 4. Elasticsearch、Meilisearch、向量数据库。
 5. 登录系统和复杂权限。
@@ -69,10 +70,14 @@ http://127.0.0.1:8000
 ├── app.py
 ├── config.py
 ├── requirements.txt
-├── data/
-│   └── app.sqlite
+├── Dockerfile
+├── docker-compose.yml
+├── .dockerignore
+├── .env.example
 ├── migrations/
-│   └── 001_init.sql
+│   └── 001_init.sql          # MySQL 8.0 方言
+├── scripts/
+│   └── seed_sources.py
 ├── templates/
 │   ├── base.html
 │   ├── dashboard.html
@@ -155,7 +160,7 @@ http://127.0.0.1:8000
 
 完成标准：
 
-1. 应用启动时自动创建 `data/app.sqlite`。
+1. 应用启动时自动执行 migration 建表（通过 schema_migrations 表保证幂等，重复执行不报错）。
 2. migration 可重复执行，不破坏已有数据。
 3. 默认插入一条 creator_profile：AI效率教练。
 4. 默认插入一条 llm_settings，provider/model 来自 .env 初始值。
@@ -366,11 +371,15 @@ POST /scripts/{id}
 
 ### migration
 
-`migrations/001_init.sql` 必须是最终可执行 SQL，不要只写伪代码。
+`migrations/001_init.sql` 必须是最终可执行 MySQL 8.0 SQL，不要只写伪代码。通过 `schema_migrations` 表记录已应用版本，重复执行时对 1050/1060/1061/1091（表/列/索引已存在或不存在）错误幂等跳过。
+
+### 连接
+
+`repositories/db.py` 用 pymysql + DictCursor + autocommit=True，并提供 `_Conn` 包装器让 repository 层沿用 `conn.execute(sql, args).fetchone()` 写法。会话时区设为 `+00:00`，让 `CURRENT_TIMESTAMP` 返回 UTC，全应用时间口径统一。
 
 ### timestamps
 
-所有时间字段统一保存 ISO 格式字符串或 SQLite `CURRENT_TIMESTAMP`。不要混用多种格式。
+所有时间字段统一用 MySQL `CURRENT_TIMESTAMP`（会话时区已设为 UTC）。不要混用多种格式。
 
 ### JSON 字段
 
@@ -382,6 +391,10 @@ POST /scripts/{id}
 4. `jobs.payload_json`
 
 读写时必须在 repository 或 service 层完成 JSON encode/decode。
+
+### SQL 占位符
+
+MySQL 使用 `%s` 占位符。字符串拼接用 `CONCAT()`，日期运算用 `DATE_ADD()` / `DATE()`，时间戳差用 `UNIX_TIMESTAMP()`。
 
 ## 7. UI 要求
 
@@ -498,7 +511,7 @@ MVP 可先手动添加这些来源，优先 RSS 或普通网页：
 
 允许 TODO：
 
-1. FTS5 搜索。
+1. MySQL FULLTEXT 全文搜索。
 2. GitHub/arXiv/HN 专用适配器。
 3. 定时任务。
 4. 发布素材包。

@@ -5,7 +5,7 @@ import logging
 
 from config import BASE_DIR
 from repositories.scripts_repo import create_script, next_version
-from repositories.topics_repo import get_topic_with_facts_and_articles
+from repositories.topics_repo import get_topic_with_facts_and_articles, set_topic_status
 from services.llm import LLMError, chat_json, get_profile_context, render_prompt
 
 logger = logging.getLogger(__name__)
@@ -60,4 +60,6 @@ def generate_script_for_topic(*, topic_id: int, platform: str, fmt: str, duratio
         hashtags=[str(h) for h in hashtags],
     )
     logger.info("生成脚本 script_id=%s topic_id=%s v%s", script_id, topic_id, version)
+    # 脚本生成成功后将选题标记为 scripted，便于选题库筛选"已写脚本"的选题
+    set_topic_status(topic_id, "scripted")
     return script_id

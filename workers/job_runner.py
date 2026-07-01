@@ -67,6 +67,8 @@ def _dispatch(jtype: str, payload: dict, job_id: int) -> None:
         _handle_generate_topic(job_id)
     elif jtype == "generate_script":
         _handle_generate_script(payload)
+    elif jtype == "generate_assets":
+        _handle_generate_assets(payload)
     else:
         raise ValueError(f"未知 job type: {jtype}")
 
@@ -81,29 +83,50 @@ def _handle_fetch_source(payload: dict) -> None:
     if not source:
         raise ValueError(f"source {source_id} 不存在")
     if not source["enabled"]:
+        logger.info("来源 %s(%s) 已停用，跳过抓取", source.get("name"), source_id)
         update_fetch_state(source_id, last_error="来源已停用，跳过")
         return
 
+    logger.info("开始抓取来源 [%s] id=%s type=%s url=%s",
+                source.get("name"), source_id, source.get("type"), source.get("url"))
     items = fetch_source(source)
+    logger.info("来源 [%s] 获取条目 %d 条，开始入库去重", source.get("name"), len(items))
+
     inserted = 0
+    deduped = 0
+    empty_content = 0
     last_seen = None
     for it in items:
+        # 正文为空时，用 fetch_error 生成提示文本，避免用户看到无信息的"无正文"
+        content_text = it.content_text
+        if not content_text and it.fetch_error:
+            content_text = f"（正文获取失败：{it.fetch_error}）"
+        if not content_text:
+            empty_content += 1
         new_id = insert_article(
             source_id=source_id, title=it.title, url=it.url, canonical_url=it.canonical_url,
             author=it.author, published_at=it.published_at, raw_html=it.raw_html,
-            content_text=it.content_text, source_item_id=it.source_item_id, language=it.language,
+            content_text=content_text, source_item_id=it.source_item_id, language=it.language,
         )
         if new_id:
             inserted += 1
+            logger.debug("新增文章 id=%s title=%s", new_id, it.title[:50])
+        else:
+            deduped += 1
         if it.source_item_id:
             last_seen = it.source_item_id
     update_fetch_state(source_id, last_error=None, last_seen_item_id=last_seen)
+    logger.info("来源 [%s] 抓取完成：新增 %d 篇，去重跳过 %d 篇，正文为空 %d 篇",
+                source.get("name"), inserted, deduped, empty_content)
 
 
 def _handle_fetch_all_sources(job_id: int) -> None:
     """对每个启用来源创建独立的 fetch_source 任务，便于并发与错误隔离。"""
-    for s in list_enabled_sources():
+    enabled = list_enabled_sources()
+    logger.info("fetch_all_sources job=%s：共 %d 个启用来源，将创建抓取子任务", job_id, len(enabled))
+    for s in enabled:
         jobs_repo.enqueue("fetch_source", {"source_id": s["id"]})
+        logger.debug("已入队 fetch_source job：source_id=%s [%s]", s["id"], s.get("name"))
 
 
 # ---------- 文章处理 ----------
@@ -135,3 +158,9 @@ def _handle_generate_script(payload: dict) -> None:
         fmt=payload["format"],
         duration=payload["duration"],
     )
+
+
+# ---------- 发布素材包 ----------
+def _handle_generate_assets(payload: dict) -> None:
+    from services.assets_generator import generate_assets_for_script
+    generate_assets_for_script(script_id=payload["script_id"])

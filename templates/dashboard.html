@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}首页 · AI效率教练{% endblock %}
+{% block title %}首页 · 口播雷达{% endblock %}
 {% block content %}
 <h1 class="page-title">今日工作台</h1>
 
@@ -59,16 +59,18 @@
   <div class="panel-head"><h2>最近脚本</h2></div>
   {% if recent_scripts %}
   <table class="table">
-    <thead><tr><th>标题</th><th>平台</th><th>模板</th><th>时长</th><th>版本</th><th>更新时间</th></tr></thead>
+    <thead><tr><th>脚本标题</th><th>所属选题</th><th>平台</th><th>模板</th><th>时长</th><th>版本</th><th>更新时间</th><th>操作</th></tr></thead>
     <tbody>
     {% for s in recent_scripts %}
       <tr>
         <td>{{ s.title or '-' }}</td>
+        <td><a href="/topics/{{ s.topic_id }}">{{ s.topic_title or '-' }}</a></td>
         <td>{{ s.platform }}</td>
         <td>{{ s.format }}</td>
         <td>{{ s.duration }}s</td>
         <td>v{{ s.version }}</td>
-        <td>{{ s.updated_at }}</td>
+        <td class="muted">{{ s.updated_at }}</td>
+        <td><a class="btn btn-sm btn-primary" href="/topics/{{ s.topic_id }}/scripts">继续编辑</a></td>
       </tr>
     {% endfor %}
     </tbody>

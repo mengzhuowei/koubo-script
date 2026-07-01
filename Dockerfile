@@ -1,4 +1,4 @@
-# AI Agent Efficiency Coach MVP Docker 镜像
+# 口播雷达 MVP Docker 镜像
 FROM python:3.11-slim
 
 # lxml/trafilatura 运行时需要的共享库（wheel 已 bundle，装上作保险）
@@ -35,6 +35,10 @@ ENV APP_HOST=0.0.0.0 \
     APP_PORT=8000 \
     TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1
+
+# 把时区链接到 /etc/localtime，确保 Python logging / datetime 默认使用 Asia/Shanghai
+RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" > /etc/timezone
 
 EXPOSE 8000
 

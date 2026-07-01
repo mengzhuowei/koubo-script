@@ -9,9 +9,9 @@
 1. 优先本地可运行。
 2. 优先少依赖、少组件。
 3. 不做前后端分离。
-4. 数据先进入 SQLite，后续再考虑升级。
+4. 数据存入 MySQL，通过 Docker 一键启动。
 5. 后台任务用 Python 自身能力实现。
-6. 检索先用 SQL，数据量变大后升级 SQLite FTS5。
+6. 检索先用 SQL，数据量变大后升级 MySQL FULLTEXT 或向量检索。
 7. 每个关键事实保留来源，降低幻觉风险。
 
 ## 2. 推荐技术栈
@@ -22,13 +22,14 @@
 | HTML 模板 | Jinja2 |
 | 页面交互 | HTMX + 少量原生 JavaScript |
 | 样式 | 普通 CSS |
-| 数据库 | SQLite |
-| 数据访问 | sqlite3 或 SQLModel |
-| 后台任务 | SQLite jobs 表 + Python worker thread |
-| 定时任务 | APScheduler |
+| 数据库 | MySQL 8.0 |
+| 数据访问 | pymysql + DictCursor |
+| 后台任务 | MySQL jobs 表 + Python worker thread |
+| 后续定时任务（MVP 外） | APScheduler |
 | 抓取 | requests、feedparser、trafilatura、BeautifulSoup、Playwright |
 | LLM 调用 | OpenAI API 或可替换 provider |
 | 配置 | .env + pydantic-settings |
+| 容器化 | Docker + docker-compose（app + mysql 双服务） |
 | 日志 | Python logging |
 
 ## 3. 应用架构
@@ -54,7 +55,7 @@ FastAPI Routes
 Repositories
   |
   v
-SQLite
+MySQL 8.0
 ```
 
 ## 4. 项目结构
@@ -64,10 +65,14 @@ agent_script_radar/
 ├── app.py
 ├── config.py
 ├── requirements.txt
-├── data/
-│   └── app.sqlite
+├── Dockerfile
+├── docker-compose.yml        # app + mysql 双服务编排
+├── .dockerignore
+├── .env.example
 ├── migrations/
-│   └── 001_init.sql
+│   └── 001_init.sql          # MySQL 8.0 方言
+├── scripts/
+│   └── seed_sources.py
 ├── templates/
 │   ├── base.html
 │   ├── dashboard.html
@@ -81,7 +86,7 @@ agent_script_radar/
 │   ├── app.css
 │   └── app.js
 ├── repositories/
-│   ├── db.py
+│   ├── db.py                 # pymysql 连接 + _Conn 包装器 + migration 执行
 │   ├── sources_repo.py
 │   ├── articles_repo.py
 │   ├── topics_repo.py
@@ -116,22 +121,22 @@ agent_script_radar/
 
 ```sql
 CREATE TABLE sources (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  url TEXT NOT NULL,
-  type TEXT NOT NULL,
-  level TEXT NOT NULL DEFAULT 'B',
-  keywords TEXT,
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  url VARCHAR(1024) NOT NULL,
+  type VARCHAR(32) NOT NULL,
+  level VARCHAR(8) NOT NULL DEFAULT 'B',
+  keywords VARCHAR(512),
   config_json TEXT,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  fetch_interval_minutes INTEGER NOT NULL DEFAULT 1440,
-  last_cursor TEXT,
-  last_seen_item_id TEXT,
-  last_fetched_at TEXT,
+  enabled TINYINT NOT NULL DEFAULT 1,
+  fetch_interval_minutes INT NOT NULL DEFAULT 1440,
+  last_cursor VARCHAR(255),
+  last_seen_item_id VARCHAR(255),
+  last_fetched_at DATETIME,
   last_error TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 type 可选值：
@@ -161,33 +166,34 @@ config_json 用于保存不同来源类型的差异化配置，例如 GitHub que
 
 ```sql
 CREATE TABLE articles (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  source_id INTEGER,
-  source_item_id TEXT,
-  title TEXT NOT NULL,
-  url TEXT NOT NULL,
-  canonical_url TEXT,
-  author TEXT,
-  published_at TEXT,
-  raw_html TEXT,
-  content_text TEXT,
-  summary TEXT,
-  key_points TEXT,
-  content_hash TEXT NOT NULL,
-  language TEXT,
-  fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  processed_at TEXT,
-  status TEXT NOT NULL DEFAULT 'new',
-  FOREIGN KEY (source_id) REFERENCES sources(id)
-);
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  source_id INT,
+  source_item_id VARCHAR(512),
+  title VARCHAR(1024) NOT NULL,
+  url VARCHAR(1024) NOT NULL,
+  canonical_url VARCHAR(1024),
+  author VARCHAR(255),
+  published_at DATETIME,
+  raw_html LONGTEXT,
+  content_text LONGTEXT,
+  summary MEDIUMTEXT,
+  key_points MEDIUMTEXT,
+  content_hash VARCHAR(64) NOT NULL,
+  language VARCHAR(16),
+  fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  processed_at DATETIME,
+  status VARCHAR(16) NOT NULL DEFAULT 'new',
+  CONSTRAINT fk_articles_source FOREIGN KEY (source_id) REFERENCES sources(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE UNIQUE INDEX idx_articles_content_hash ON articles(content_hash);
-CREATE UNIQUE INDEX idx_articles_source_item ON articles(source_id, source_item_id)
-  WHERE source_item_id IS NOT NULL;
-CREATE UNIQUE INDEX idx_articles_canonical_url ON articles(canonical_url)
-  WHERE canonical_url IS NOT NULL;
+-- MySQL 不支持部分索引 WHERE，但唯一索引中多个 NULL 视为不同值，天然等价于部分索引效果
+CREATE UNIQUE INDEX idx_articles_source_item ON articles(source_id, source_item_id);
+-- utf8mb4 下 VARCHAR(1024) 索引达 4096 字节超过 3072 限制，使用前缀 768 字符（=3072 字节）
+CREATE UNIQUE INDEX idx_articles_canonical_url ON articles(canonical_url(768));
 CREATE INDEX idx_articles_published_at ON articles(published_at);
 CREATE INDEX idx_articles_source_id ON articles(source_id);
+CREATE INDEX idx_articles_status ON articles(status);
 ```
 
 status 可选值：
@@ -207,23 +213,23 @@ summary 和 key_points 保存文章级摘要，供选题生成、排查和重新
 
 ```sql
 CREATE TABLE topics (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  title TEXT NOT NULL,
-  one_line_takeaway TEXT,
-  summary TEXT,
-  category TEXT,
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(512) NOT NULL,
+  one_line_takeaway VARCHAR(1024),
+  summary MEDIUMTEXT,
+  category VARCHAR(64),
   audience TEXT,
-  recommended_column TEXT,
-  recommended_platform TEXT,
-  recommended_duration INTEGER,
-  score INTEGER NOT NULL DEFAULT 0,
-  source_level TEXT,
+  recommended_column VARCHAR(64),
+  recommended_platform VARCHAR(32),
+  recommended_duration INT,
+  score INT NOT NULL DEFAULT 0,
+  source_level VARCHAR(8),
   actionable_value TEXT,
   risk_notes TEXT,
-  status TEXT NOT NULL DEFAULT 'new',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+  status VARCHAR(16) NOT NULL DEFAULT 'new',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_topics_score ON topics(score);
 CREATE INDEX idx_topics_status ON topics(status);
@@ -244,12 +250,12 @@ archived
 
 ```sql
 CREATE TABLE topic_articles (
-  topic_id INTEGER NOT NULL,
-  article_id INTEGER NOT NULL,
+  topic_id INT NOT NULL,
+  article_id INT NOT NULL,
   PRIMARY KEY (topic_id, article_id),
-  FOREIGN KEY (topic_id) REFERENCES topics(id),
-  FOREIGN KEY (article_id) REFERENCES articles(id)
-);
+  CONSTRAINT fk_ta_topic FOREIGN KEY (topic_id) REFERENCES topics(id),
+  CONSTRAINT fk_ta_article FOREIGN KEY (article_id) REFERENCES articles(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 ### 5.5 topic_facts
@@ -258,14 +264,16 @@ CREATE TABLE topic_articles (
 
 ```sql
 CREATE TABLE topic_facts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  topic_id INTEGER NOT NULL,
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  topic_id INT NOT NULL,
   claim TEXT NOT NULL,
-  source_url TEXT NOT NULL,
-  confidence TEXT NOT NULL DEFAULT 'medium',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (topic_id) REFERENCES topics(id)
-);
+  source_url VARCHAR(1024) NOT NULL,
+  confidence VARCHAR(16) NOT NULL DEFAULT 'medium',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_facts_topic FOREIGN KEY (topic_id) REFERENCES topics(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_topic_facts_topic_id ON topic_facts(topic_id);
 ```
 
 confidence 可选值：
@@ -282,23 +290,23 @@ low
 
 ```sql
 CREATE TABLE scripts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  topic_id INTEGER NOT NULL,
-  platform TEXT NOT NULL,
-  format TEXT NOT NULL,
-  duration INTEGER NOT NULL,
-  title TEXT,
-  hook TEXT,
-  body TEXT NOT NULL,
-  cta TEXT,
-  cover_text TEXT,
-  description TEXT,
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  topic_id INT NOT NULL,
+  platform VARCHAR(32) NOT NULL,
+  format VARCHAR(32) NOT NULL,
+  duration INT NOT NULL,
+  title VARCHAR(512),
+  hook VARCHAR(1024),
+  body LONGTEXT NOT NULL,
+  cta VARCHAR(1024),
+  cover_text VARCHAR(255),
+  description MEDIUMTEXT,
   hashtags TEXT,
-  version INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (topic_id) REFERENCES topics(id)
-);
+  version INT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_scripts_topic FOREIGN KEY (topic_id) REFERENCES topics(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_scripts_topic_id ON scripts(topic_id);
 CREATE UNIQUE INDEX idx_scripts_version ON scripts(topic_id, platform, format, duration, version);
@@ -312,16 +320,16 @@ CREATE UNIQUE INDEX idx_scripts_version ON scripts(topic_id, platform, format, d
 
 ```sql
 CREATE TABLE creator_profile (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  positioning TEXT NOT NULL,
-  target_audience TEXT,
-  tone TEXT,
-  content_boundary TEXT,
-  default_cta TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(64) NOT NULL,
+  positioning VARCHAR(512) NOT NULL,
+  target_audience VARCHAR(512),
+  tone VARCHAR(255),
+  content_boundary VARCHAR(512),
+  default_cta VARCHAR(512),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 默认值：
@@ -343,15 +351,15 @@ creator_profile 必须通过设置页可编辑。代码只能使用默认值做�
 
 ```sql
 CREATE TABLE llm_settings (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  provider TEXT NOT NULL DEFAULT 'openai',
-  model TEXT NOT NULL,
-  temperature REAL NOT NULL DEFAULT 0.4,
-  max_tokens INTEGER NOT NULL DEFAULT 2000,
-  api_key_env_var TEXT NOT NULL DEFAULT 'OPENAI_API_KEY',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  provider VARCHAR(32) NOT NULL DEFAULT 'openai',
+  model VARCHAR(64) NOT NULL,
+  temperature FLOAT NOT NULL DEFAULT 0.4,
+  max_tokens INT NOT NULL DEFAULT 2000,
+  api_key_env_var VARCHAR(64) NOT NULL DEFAULT 'OPENAI_API_KEY',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 说明：
@@ -367,21 +375,21 @@ CREATE TABLE llm_settings (
 
 ```sql
 CREATE TABLE jobs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  type TEXT NOT NULL,
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  type VARCHAR(32) NOT NULL,
   payload_json TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
-  attempts INTEGER NOT NULL DEFAULT 0,
-  max_attempts INTEGER NOT NULL DEFAULT 3,
-  available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  locked_by TEXT,
-  heartbeat_at TEXT,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  attempts INT NOT NULL DEFAULT 0,
+  max_attempts INT NOT NULL DEFAULT 3,
+  available_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  locked_by VARCHAR(64),
+  heartbeat_at DATETIME,
   error TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  started_at TEXT,
-  finished_at TEXT
-);
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  started_at DATETIME,
+  finished_at DATETIME
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_jobs_status ON jobs(status);
 CREATE INDEX idx_jobs_type ON jobs(type);
@@ -403,13 +411,13 @@ fact_check_script
 
 ### 6.1 任务队列策略
 
-不引入 Celery 和 Redis。使用 SQLite jobs 表作为持久化任务队列。
+不引入 Celery 和 Redis。使用 MySQL jobs 表作为持久化任务队列。
 
 处理逻辑：
 
 ```text
 1. Web 请求创建 pending job。
-2. worker thread 每隔 1-3 秒查询 pending jobs。
+2. worker thread 每隔 2 秒（JOB_POLL_INTERVAL_SECONDS 可配）查询 pending jobs。
 3. 抢占一条任务，标记为 running。
 4. 执行业务逻辑。
 5. 成功则标记 done。
@@ -417,12 +425,19 @@ fact_check_script
 7. attempts 小于 max_attempts 时可重新置为 pending。
 ```
 
-抢占任务时只选择：
+任务抢占使用 MySQL 行级锁保证多 worker 安全：
 
-```text
-status = pending
-available_at <= now
+```sql
+START TRANSACTION;
+SELECT * FROM jobs
+  WHERE status = 'pending' AND available_at <= CURRENT_TIMESTAMP
+  ORDER BY id ASC LIMIT 1
+  FOR UPDATE SKIP LOCKED;
+-- 找到后立即 UPDATE 为 running 并写入 locked_by / heartbeat_at
+COMMIT;
 ```
+
+`FOR UPDATE SKIP LOCKED` 让多个 worker 并发抢占时互不阻塞，被其他 worker 锁住的行直接跳过。
 
 任务运行时 worker 定期更新 heartbeat_at。若程序崩溃，启动时把超时的 running 任务恢复为 pending：
 
@@ -435,7 +450,7 @@ locked_by 保存当前 worker 标识，方便排查任务卡住的问题。
 
 ### 6.2 并发策略
 
-MVP 阶段默认单 worker，避免 SQLite 写锁问题。
+MVP 阶段默认单 worker，简化并发模型。MySQL 行级锁已为后续多 worker 留好基础。
 
 后续可升级为：
 
@@ -443,9 +458,9 @@ MVP 阶段默认单 worker，避免 SQLite 写锁问题。
 2. LLM 任务 1 个并发。
 3. 长任务增加取消按钮。
 
-### 6.3 定时任务
+### 6.3 定时任务（MVP 外）
 
-APScheduler 负责创建任务，不直接执行业务。
+定时任务不属于 MVP。后续稳定生产版可使用 APScheduler 创建任务，不直接执行业务。
 
 示例：
 
@@ -502,7 +517,7 @@ MVP 阶段使用可解释规则聚合：
 4. 同一集合内优先使用 S/A 级来源生成关键事实。
 5. 支持用户在文章详情页手动加入已有 topic。
 
-后续再考虑 FTS5 相似搜索或向量聚类。
+后续再考虑 MySQL FULLTEXT 相似搜索或向量聚类。
 
 ## 8. LLM 流程
 
@@ -567,9 +582,9 @@ Article Text
 7. 包含风险提醒。
 8. 结尾回到设置页配置的人设。
 
-### 8.5 事实校验
+### 8.5 后续事实校验（MVP 外）
 
-事实校验不要求完全自动判断真伪，MVP 只做三件事：
+事实校验不属于 MVP。后续质量增强阶段可先做三件事：
 
 1. 抽取脚本中的事实性声明。
 2. 检查是否能在 topic_facts 或关联文章中找到来源。
@@ -615,13 +630,18 @@ POST /topics/{id}/archive      归档选题
 GET  /topics/{id}/scripts      脚本编辑页
 POST /topics/{id}/scripts      生成脚本
 POST /scripts/{id}             保存脚本
-POST /scripts/{id}/fact-check  校验脚本
 
 GET  /settings                 设置页
 POST /settings/profile         更新账号人设
 POST /settings/model           更新模型配置
 
 GET  /jobs                     任务列表
+```
+
+MVP 外后续路由：
+
+```text
+POST /scripts/{id}/fact-check  校验脚本
 ```
 
 ### 9.2 HTMX 局部刷新
@@ -640,20 +660,23 @@ GET  /jobs                     任务列表
 ```sql
 SELECT *
 FROM articles
-WHERE title LIKE '%' || :keyword || '%'
-   OR content_text LIKE '%' || :keyword || '%'
+WHERE title LIKE CONCAT('%', %s, '%')
+   OR content_text LIKE CONCAT('%', %s, '%')
 ORDER BY published_at DESC
 LIMIT 100;
 ```
 
-### 10.2 后续 FTS5 升级
+### 10.2 后续 FULLTEXT 升级（MVP 外）
 
 ```sql
-CREATE VIRTUAL TABLE articles_fts
-USING fts5(title, content_text);
+ALTER TABLE articles ADD FULLTEXT INDEX ft_articles_title_content (title, content_text);
+
+SELECT * FROM articles
+WHERE MATCH(title, content_text) AGAINST(%s IN NATURAL LANGUAGE MODE)
+ORDER BY published_at DESC LIMIT 100;
 ```
 
-FTS5 仍在 SQLite 内部，不增加部署复杂度。
+MySQL 8.0 InnoDB 内置 FULLTEXT 索引，ngram 分词器可支持中文，不增加额外组件。
 
 ## 11. 配置设计
 
@@ -663,15 +686,34 @@ FTS5 仍在 SQLite 内部，不增加部署复杂度。
 APP_ENV=development
 APP_HOST=127.0.0.1
 APP_PORT=8000
-DATABASE_PATH=data/app.sqlite
+
+# MySQL
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=koubo
+DB_PASSWORD=koubo
+DB_NAME=koubo
+# 仅 Docker compose 使用：MySQL 容器初始化参数
+MYSQL_ROOT_PASSWORD=rootpass
+MYSQL_DATABASE=koubo
+MYSQL_USER=koubo
+MYSQL_PASSWORD=koubo
+
 OPENAI_API_KEY=
+OPENAI_BASE_URL=https://api.openai.com/v1
 DEFAULT_LLM_PROVIDER=openai
-DEFAULT_LLM_MODEL=
+DEFAULT_LLM_MODEL=gpt-4o-mini
 FETCH_USER_AGENT=AgentScriptRadar/0.1
 JOB_HEARTBEAT_TIMEOUT_SECONDS=300
+JOB_POLL_INTERVAL_SECONDS=2.0
+LOG_LEVEL=INFO
 ```
 
-说明：DEFAULT_LLM_PROVIDER 和 DEFAULT_LLM_MODEL 只用于首次初始化 llm_settings。应用运行后以页面保存的模型配置为准。
+说明：
+
+1. DEFAULT_LLM_PROVIDER 和 DEFAULT_LLM_MODEL 只用于首次初始化 llm_settings。应用运行后以页面保存的模型配置为准。
+2. Docker 运行时 compose 会自动覆盖 DB_HOST=mysql，并通过 MYSQL_DATABASE 让 MySQL 容器首次启动自动建库。
+3. 本地运行需先手动创建数据库：`CREATE DATABASE koubo CHARACTER SET utf8mb4;` 并建用户授权。
 
 ## 12. 错误处理
 
@@ -716,12 +758,15 @@ LLM 输出 JSON 失败时：
 
 ## 14. 本地运行方式
 
+### 方式一：Docker（推荐）
+
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python app.py
+# 复制环境变量模板并填入 OPENAI_API_KEY（可选）
+cp .env.example .env
+docker compose up -d --build
 ```
+
+compose 会自动拉起 mysql:8.0 和 app 两个容器，MySQL 健康后 app 才启动。数据通过命名卷 `mysql-data` 持久化。
 
 访问：
 
@@ -729,13 +774,34 @@ python app.py
 http://127.0.0.1:8000
 ```
 
+### 方式二：本地直接运行
+
+需先准备 MySQL 8.0 实例并建库授权：
+
+```sql
+CREATE DATABASE koubo CHARACTER SET utf8mb4;
+CREATE USER 'koubo'@'%' IDENTIFIED BY 'koubo';
+GRANT ALL ON koubo.* TO 'koubo'@'%';
+```
+
+然后：
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python app.py
+```
+
+应用启动时会自动执行 migration 建表，并写入默认 creator_profile 与 llm_settings。
+
 ## 15. MVP 开发顺序
 
 ### Step 1: 项目骨架
 
 1. FastAPI app。
 2. Jinja2 base 模板。
-3. SQLite 初始化。
+3. MySQL 初始化（migration + schema_migrations 幂等执行）。
 4. 首页。
 
 ### Step 2: 来源库
@@ -770,22 +836,25 @@ http://127.0.0.1:8000
 1. jobs 表。
 2. worker thread。
 3. 任务列表页。
-4. APScheduler 定时创建任务。
+4. 手动创建/重试任务。
 
-### Step 7: 质量增强
+说明：MVP 开发顺序到 Step 6 结束。以下能力均为 MVP 外 TODO，按 `agent-implementation-guide.md` 的开发边界处理。
+
+### MVP 外 TODO
 
 1. 事实校验。
 2. 发布素材包。
-3. FTS5 搜索。
+3. MySQL FULLTEXT 全文搜索。
 4. 视频表现反馈录入。
+5. APScheduler 定时任务。
 
 ## 16. 后续可升级方向
 
 当 MVP 跑通后，再考虑：
 
-1. SQLite -> PostgreSQL。
-2. SQL LIKE -> SQLite FTS5 -> 向量检索。
-3. 单 worker -> 多 worker。
+1. MySQL 单机 -> MySQL 主从 / 云数据库 RDS。
+2. SQL LIKE -> MySQL FULLTEXT -> 向量检索。
+3. 单 worker -> 多 worker（FOR UPDATE SKIP LOCKED 已就绪）。
 4. 本地应用 -> VPS 部署。
 5. 手动发布 -> 半自动发布素材管理。
 6. 单账号 -> 多账号人设配置。

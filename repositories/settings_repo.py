@@ -19,7 +19,7 @@ def ensure_defaults() -> None:
             conn.execute(
                 """INSERT INTO creator_profile
                    (name, positioning, target_audience, tone, content_boundary, default_cta)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
                 (
                     "AI效率教练",
                     "把复杂 AI Agent 技术拆成普通人也能跑通的效率工作流",
@@ -32,7 +32,7 @@ def ensure_defaults() -> None:
         if not conn.execute("SELECT 1 FROM llm_settings LIMIT 1").fetchone():
             conn.execute(
                 """INSERT INTO llm_settings (provider, model, temperature, max_tokens, api_key_env_var)
-                   VALUES (?, ?, 0.4, 2000, 'OPENAI_API_KEY')""",
+                   VALUES (%s, %s, 0.4, 2000, 'OPENAI_API_KEY')""",
                 (app_settings.default_llm_provider, app_settings.default_llm_model or "gpt-4o-mini"),
             )
     finally:
@@ -56,16 +56,16 @@ def update_profile(*, name: str, positioning: str, target_audience: str, tone: s
         if existing:
             conn.execute(
                 """UPDATE creator_profile
-                   SET name=?, positioning=?, target_audience=?, tone=?, content_boundary=?, default_cta=?,
+                   SET name=%s, positioning=%s, target_audience=%s, tone=%s, content_boundary=%s, default_cta=%s,
                        updated_at=CURRENT_TIMESTAMP
-                   WHERE id=?""",
+                   WHERE id=%s""",
                 (name, positioning, target_audience, tone, content_boundary, default_cta, existing["id"]),
             )
         else:
             conn.execute(
                 """INSERT INTO creator_profile
                    (name, positioning, target_audience, tone, content_boundary, default_cta)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
                 (name, positioning, target_audience, tone, content_boundary, default_cta),
             )
     finally:
@@ -88,14 +88,14 @@ def update_llm_settings(*, provider: str, model: str, temperature: float, max_to
         if existing:
             conn.execute(
                 """UPDATE llm_settings
-                   SET provider=?, model=?, temperature=?, max_tokens=?, updated_at=CURRENT_TIMESTAMP
-                   WHERE id=?""",
+                   SET provider=%s, model=%s, temperature=%s, max_tokens=%s, updated_at=CURRENT_TIMESTAMP
+                   WHERE id=%s""",
                 (provider, model, float(temperature), int(max_tokens), existing["id"]),
             )
         else:
             conn.execute(
                 """INSERT INTO llm_settings (provider, model, temperature, max_tokens, api_key_env_var)
-                   VALUES (?, ?, ?, ?, 'OPENAI_API_KEY')""",
+                   VALUES (%s, %s, %s, %s, 'OPENAI_API_KEY')""",
                 (provider, model, float(temperature), int(max_tokens)),
             )
     finally:

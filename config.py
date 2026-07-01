@@ -12,22 +12,27 @@ class Settings(BaseSettings):
     app_host: str = "127.0.0.1"
     app_port: int = 8000
 
-    database_path: str = "data/app.sqlite"
+    # MySQL 连接配置
+    db_host: str = "127.0.0.1"
+    db_port: int = 3306
+    db_user: str = "koubo"
+    db_password: str = "koubo"
+    db_name: str = "koubo"
+
     openai_api_key: str = ""
     default_llm_provider: str = "openai"
     default_llm_model: str = "gpt-4o-mini"
 
     fetch_user_agent: str = "AgentScriptRadar/0.1"
-    job_heartbeat_timeout_seconds: int = 300
     job_poll_interval_seconds: float = 2.0
 
-    @property
-    def database_url(self) -> str:
-        return str((BASE_DIR / self.database_path).replace("\\", "/"))
-
-    @property
-    def db_path(self) -> Path:
-        return BASE_DIR / self.database_path
+    # 定时抓取调度。scheduler_enabled 关闭则不自动抓取。
+    # scheduler_fetch_check_interval_minutes：调度器轮询间隔，到期源才会入队抓取。
+    # scheduler_topic_enabled 默认关闭——generate_topic 会消耗 LLM，按约束不自动触发。
+    scheduler_enabled: bool = True
+    scheduler_fetch_check_interval_minutes: int = 30
+    scheduler_topic_enabled: bool = False
+    scheduler_topic_cron: str = "30 9 * * *"
 
 
 settings = Settings()
