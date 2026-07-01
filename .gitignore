@@ -46,3 +46,4 @@ desktop.ini
 
 # ---------- Docker 本地产物（镜像本身不入库） ----------
 # docker-compose.yml 和 Dockerfile 需要入库，不忽略
+docker-compose.yml
