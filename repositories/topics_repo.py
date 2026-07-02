@@ -81,7 +81,8 @@ def set_topic_status(topic_id: int, status: str) -> None:
         conn.close()
 
 
-def list_topics(*, status: str = "", category: str = "", limit: int = 200) -> list[dict]:
+def list_topics(*, status: str = "", category: str = "", date_from: str = "",
+                date_to: str = "", limit: int = 200) -> list[dict]:
     sql = "SELECT * FROM topics WHERE 1=1"
     params: list = []
     if status:
@@ -90,6 +91,12 @@ def list_topics(*, status: str = "", category: str = "", limit: int = 200) -> li
     if category:
         sql += " AND (recommended_column = %s OR category = %s)"
         params += [category, category]
+    if date_from:
+        sql += " AND DATE(created_at) >= %s"
+        params.append(date_from)
+    if date_to:
+        sql += " AND DATE(created_at) <= %s"
+        params.append(date_to)
     sql += " ORDER BY score DESC, id DESC LIMIT %s"
     params.append(limit)
     conn = get_conn()

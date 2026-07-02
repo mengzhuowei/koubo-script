@@ -123,16 +123,29 @@ def source_fetch(source_id: int):
 
 
 # ---------- 文章池 ----------
+PAGE_SIZE = 50  # 文章池每页条数
+
 @app.get("/articles", response_class=HTMLResponse)
-def articles_page(request: Request, q: str = "", source_id: int = 0, no_content: int = 0):
-    from repositories.articles_repo import search_articles, list_sources_for_filter
+def articles_page(request: Request, q: str = "", source_id: int = 0,
+                  no_content: int = 0, page: int = 1):
+    from repositories.articles_repo import search_articles, count_articles, list_sources_for_filter
+    page = max(1, page)
+    offset = (page - 1) * PAGE_SIZE
+    articles = search_articles(q=q, source_id=source_id, no_content=bool(no_content),
+                               limit=PAGE_SIZE, offset=offset)
+    total = count_articles(q=q, source_id=source_id, no_content=bool(no_content))
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     return render(request, "articles.html", {
         "active": "articles",
-        "articles": search_articles(q=q, source_id=source_id, no_content=bool(no_content)),
+        "articles": articles,
         "q": q,
         "source_id": source_id,
         "no_content": bool(no_content),
         "sources": list_sources_for_filter(),
+        "page": page,
+        "page_size": PAGE_SIZE,
+        "total": total,
+        "total_pages": total_pages,
     })
 
 
@@ -168,13 +181,16 @@ def article_add_to_topic(article_id: int, topic_id: int = Form(...)):
 
 # ---------- 选题库 ----------
 @app.get("/topics", response_class=HTMLResponse)
-def topics_page(request: Request, status: str = "", category: str = ""):
+def topics_page(request: Request, status: str = "", category: str = "",
+                date_from: str = "", date_to: str = ""):
     from repositories.topics_repo import list_topics
     return render(request, "topics.html", {
         "active": "topics",
-        "topics": list_topics(status=status, category=category),
+        "topics": list_topics(status=status, category=category, date_from=date_from, date_to=date_to),
         "status": status,
         "category": category,
+        "date_from": date_from,
+        "date_to": date_to,
     })
 
 

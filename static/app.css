@@ -69,6 +69,7 @@ a:hover { text-decoration: underline; }
 .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
 .btn-primary:hover { background: var(--primary-dark); }
 .btn-sm { padding: 3px 8px; font-size: 12px; }
+.pagination { display: flex; align-items: center; gap: 6px; margin-top: 12px; justify-content: center; }
 .btn-danger { color: var(--red); border-color: #f0c4c3; }
 
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }

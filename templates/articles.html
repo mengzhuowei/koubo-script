@@ -22,7 +22,7 @@
   <section class="panel">
     {% if articles %}
     <div class="panel-head" style="border:none;padding:0 0 8px 0">
-      <span class="muted">共 {{ articles|length }} 篇</span>
+      <span class="muted">显示 {{ (page-1)*page_size + 1 }}-{{ (page-1)*page_size + articles|length }} / 共 {{ total }} 篇{% if total_pages > 1 %} · 第 {{ page }}/{{ total_pages }} 页{% endif %}</span>
       <button class="btn btn-sm btn-danger" type="submit" onclick="return confirm('确认批量忽略选中的文章？')">批量忽略选中</button>
     </div>
     <table class="table">
@@ -57,6 +57,16 @@
       {% endfor %}
       </tbody>
     </table>
+    {% if total_pages > 1 %}
+    <div class="pagination">
+      {% set qp = 'q=' ~ q ~ '&source_id=' ~ source_id ~ ('&no_content=1' if no_content else '') %}
+      {% if page > 1 %}<a class="btn btn-sm" href="/articles?{{ qp }}&page=1">« 首页</a>{% endif %}
+      {% if page > 1 %}<a class="btn btn-sm" href="/articles?{{ qp }}&page={{ page - 1 }}">‹ 上一页</a>{% endif %}
+      <span class="muted" style="margin:0 8px">第 {{ page }} / {{ total_pages }} 页</span>
+      {% if page < total_pages %}<a class="btn btn-sm" href="/articles?{{ qp }}&page={{ page + 1 }}">下一页 ›</a>{% endif %}
+      {% if page < total_pages %}<a class="btn btn-sm" href="/articles?{{ qp }}&page={{ total_pages }}">末页 »</a>{% endif %}
+    </div>
+    {% endif %}
     {% else %}
     <div class="empty">暂无文章，去来源库抓取试试。</div>
     {% endif %}

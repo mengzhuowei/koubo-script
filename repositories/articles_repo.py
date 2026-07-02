@@ -36,11 +36,13 @@ def insert_article(*, source_id: int, title: str, url: str, canonical_url: str |
         conn.close()
 
 
-def search_articles(*, q: str = "", source_id: int = 0, no_content: bool = False, limit: int = 200) -> list[dict]:
+def search_articles(*, q: str = "", source_id: int = 0, no_content: bool = False,
+                     limit: int = 50, offset: int = 0) -> list[dict]:
     """按标题/正文关键词与来源筛选。no_content=True 时只返回正文为空的记录。
 
     关键词搜索优先用 FULLTEXT（ngram 解析器，支持中文，按相关度排序）。
     查询长度 < 2 时 FULLTEXT 无法匹配（ngram 最小 token=2），回退到 LIKE。
+    分页：limit 单页条数，offset 偏移（与 ORDER BY/LIMIT 配合）。
     """
     q = q.strip()
     use_fulltext = bool(q) and len(q) >= 2
@@ -73,12 +75,39 @@ def search_articles(*, q: str = "", source_id: int = 0, no_content: bool = False
         sql += " ORDER BY relevance DESC, a.fetched_at DESC"
     else:
         sql += " ORDER BY a.fetched_at DESC"
-    sql += " LIMIT %s"
-    params.append(limit)
+    sql += " LIMIT %s OFFSET %s"
+    params += [limit, offset]
 
     conn = get_conn()
     try:
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
+    finally:
+        conn.close()
+
+
+def count_articles(*, q: str = "", source_id: int = 0, no_content: bool = False) -> int:
+    """统计搜索结果总数，与 search_articles 共享同一组 WHERE 条件。"""
+    q = q.strip()
+    use_fulltext = bool(q) and len(q) >= 2
+    if use_fulltext:
+        fulltext_q = '"' + q.replace('"', '') + '"'
+    sql = "SELECT COUNT(*) AS n FROM articles a WHERE 1=1"
+    params: list = []
+    if use_fulltext:
+        sql += " AND MATCH(a.title, a.content_text) AGAINST(%s IN BOOLEAN MODE)"
+        params.append(fulltext_q)
+    elif q:
+        sql += " AND (a.title LIKE %s OR a.content_text LIKE %s)"
+        params += [f"%{q}%", f"%{q}%"]
+    if source_id:
+        sql += " AND a.source_id = %s"
+        params.append(source_id)
+    if no_content:
+        sql += " AND (a.content_text IS NULL OR a.content_text = '' OR a.content_text LIKE %s)"
+        params.append("（正文获取失败%")
+    conn = get_conn()
+    try:
+        return int(conn.execute(sql, params).fetchone()["n"])
     finally:
         conn.close()
 
