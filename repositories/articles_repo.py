@@ -151,6 +151,21 @@ def ignore_article(article_id: int) -> None:
         conn.close()
 
 
+def update_article_content(article_id: int, *, title: str, content_text: str) -> None:
+    """人工补充/修正正文。只改 title 与 content_text，不动 status / content_hash：
+    content_hash 仅用于入库去重（INSERT IGNORE），事后改不影响去重判定；
+    status 保持原值，避免误改流程状态（如把 ignored 直接翻成 new）。
+    """
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE articles SET title=%s, content_text=%s WHERE id=%s",
+            (title, content_text, article_id),
+        )
+    finally:
+        conn.close()
+
+
 def list_sources_for_filter() -> list[dict]:
     from repositories.sources_repo import list_sources
     return list_sources()

@@ -172,6 +172,14 @@ def article_ignore(article_id: int):
     return RedirectResponse(url="/articles", status_code=303)
 
 
+@app.post("/articles/{article_id}/edit")
+def article_edit(article_id: int, title: str = Form(...), content_text: str = Form("")):
+    """人工补充/修正正文。保存后回到详情页。"""
+    from repositories.articles_repo import update_article_content
+    update_article_content(article_id, title=title, content_text=content_text)
+    return RedirectResponse(url=f"/articles/{article_id}", status_code=303)
+
+
 @app.post("/articles/{article_id}/add-to-topic")
 def article_add_to_topic(article_id: int, topic_id: int = Form(...)):
     from repositories.topics_repo import add_article_to_topic

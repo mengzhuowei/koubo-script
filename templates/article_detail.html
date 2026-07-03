@@ -40,6 +40,21 @@
     </div>
 
     <details style="margin-top:16px">
+      <summary class="link">编辑正文</summary>
+      <form method="post" action="/articles/{{ article.id }}/edit" style="margin-top:8px">
+        <div class="form-row">
+          <label>标题</label>
+          <input type="text" name="title" value="{{ article.title }}" required style="width:100%">
+        </div>
+        <div class="form-row">
+          <label>正文</label>
+          <textarea name="content_text" rows="16" style="width:100%;font-family:inherit">{{ article.content_text or '' }}</textarea>
+        </div>
+        <button class="btn btn-primary" type="submit">保存</button>
+      </form>
+    </details>
+
+    <details style="margin-top:16px">
       <summary class="link">加入已有选题</summary>
       <form class="form-inline" method="post" action="/articles/{{ article.id }}/add-to-topic" style="margin-top:8px">
         <input type="number" name="topic_id" placeholder="选题 ID" required>
