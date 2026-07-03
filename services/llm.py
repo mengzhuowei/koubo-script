@@ -39,10 +39,13 @@ def chat(messages: list[dict], *, json_mode: bool = False) -> str:
     """调用一次 chat completion，返回文本内容。"""
     llm = get_llm_settings()
     client = _build_client()
+    # max_tokens 上限兜底：部分模型接口要求 ≤ 32768，
+    # DB 里若被设成超大的值会让请求 400，这里统一截断。
+    max_tokens = max(1, min(int(llm["max_tokens"]), 32768))
     kwargs: dict[str, Any] = {
         "model": llm["model"],
         "temperature": float(llm["temperature"]),
-        "max_tokens": int(llm["max_tokens"]),
+        "max_tokens": max_tokens,
         "messages": messages,
     }
     if json_mode:
