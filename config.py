@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     default_llm_provider: str = "openai"
     default_llm_model: str = "gpt-4o-mini"
 
-    fetch_user_agent: str = "AgentScriptRadar/0.1"
+    # 默认 UA 改用浏览器 UA，避免被 SSR 站点（如 InfoQ）当作爬虫返回空壳 HTML
+    fetch_user_agent: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
     job_poll_interval_seconds: float = 2.0
 
     # 定时抓取调度。scheduler_enabled 关闭则不自动抓取。

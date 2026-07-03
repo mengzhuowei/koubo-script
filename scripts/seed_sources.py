@@ -284,11 +284,11 @@ SOURCES = [
     {
         "name": "机器之心",
         "url": "https://www.jiqizhixin.com/",
-        "type": "webpage",
+        "type": "manual",
         "level": "C",
-        "enabled": 1,
+        "enabled": 0,
         "keywords": kw("机器之心,AI Agent,智能体,大模型"),
-        "note": "产品设计中文传播源：机器之心。",
+        "note": "中文传播源：机器之心。站点已改版为付费数据服务（RSS/MCP/AI Skills），文章不再公开可抓取，停用待替代方案。",
     },
     {
         "name": "量子位 RSS",

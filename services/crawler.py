@@ -128,6 +128,8 @@ def fetch_source(source: dict) -> list[FetchItem]:
         return _fetch_webpage(source)
     if stype == "webpage_list":
         return _fetch_webpage_list(source)
+    if stype == "spa_list":
+        return _fetch_spa_list(source)
     if stype == "bilibili_search":
         return _fetch_bilibili_search(source)
     if stype == "manual":
@@ -314,6 +316,140 @@ def _fetch_webpage_list(source: dict) -> list[FetchItem]:
     return items
 
 
+# ---------- SPA 列表抓取（Playwright 渲染） ----------
+# 适用于纯 JS 渲染的站点（如机器之心 jiqizhixin.com）：SSR 不返回文章链接和正文，
+# 必须执行 JS 才能拿到内容。用 Playwright 启动无头 Chromium 渲染页面。
+# 复用熔断机制：连续 _FAIL_CIRCUIT 次渲染/提取失败则停止该来源后续抓取。
+def _spa_goto(page, url: str, min_text_len: int = 0) -> str:
+    """Playwright 页面导航通用等待：domcontentloaded + networkidle（容忍超时）+ 正文/渲染缓冲。
+
+    min_text_len>0 时，等待 body 纯文本长度达标（适用于正文异步加载的文章页），
+    达标或超时（8s）后返回；min_text_len=0 时用固定 2s 缓冲（适用于列表页）。
+    """
+    page.goto(url, timeout=30000, wait_until="domcontentloaded")
+    try:
+        page.wait_for_load_state("networkidle", timeout=10000)
+    except Exception:
+        # 部分站点持续有长轮询/埋点请求，networkidle 永远达不到，忽略后靠固定延时兜底
+        pass
+    if min_text_len > 0:
+        try:
+            page.wait_for_function(
+                f"() => document.body && document.body.innerText.length >= {min_text_len}",
+                timeout=8000,
+            )
+        except Exception:
+            # 超时仍未达标，再给一点缓冲后放弃等待
+            page.wait_for_timeout(1000)
+    else:
+        page.wait_for_timeout(2000)
+    return page.content()
+
+
+def _fetch_spa_list(source: dict) -> list[FetchItem]:
+    """SPA 列表抓取分派器：按 host 选择抓取策略。
+
+    不同 SPA 站点结构差异大，按 host 分派到专用实现。新增 SPA 站点时在此加分支。
+    """
+    return _fetch_spa_list_dom(source)
+
+
+def _fetch_spa_list_dom(source: dict) -> list[FetchItem]:
+    """通用 SPA 列表渲染：Playwright 渲染列表页，提取 <a href> 文章链接，逐篇渲染抓正文。
+
+    一个浏览器实例完成列表页 + 所有文章页渲染，避免反复启动浏览器的开销。
+    文章链接匹配规则：同 host 且 path 以 /articles/ 开头。
+    """
+    from playwright.sync_api import sync_playwright
+
+    url = source["url"]
+    logger.info("SPA 列表抓取开始：[%s] %s", source.get("name"), url)
+
+    items: list[FetchItem] = []
+    try:
+        pw = sync_playwright().start()
+    except Exception as e:
+        logger.error("Playwright 启动失败，SPA 抓取中止：%s", e)
+        return []
+    browser = None
+    try:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page(user_agent=settings.fetch_user_agent)
+        page.set_extra_http_headers({"Accept-Language": "en,zh-CN;q=0.8,zh;q=0.6"})
+
+        # 1. 渲染列表页
+        try:
+            list_html = _spa_goto(page, url)
+        except Exception as e:
+            logger.warning("SPA 列表页渲染失败 %s: %s", url, e)
+            return []
+
+        soup = BeautifulSoup(list_html, "lxml")
+        base_host = urlsplit(url).netloc.lower()
+        seen: set[str] = set()
+        article_links: list[tuple[str, str]] = []
+        for a in soup.select("a[href]"):
+            href = a.get("href", "")
+            if not href:
+                continue
+            abs_url = urljoin(url, href)
+            parts = urlsplit(abs_url)
+            # 同 host + path 以 /articles/ 开头（排除 /articles 列表页本身）
+            if parts.netloc.lower() != base_host:
+                continue
+            if not parts.path.startswith("/articles/"):
+                continue
+            if abs_url in seen:
+                continue
+            seen.add(abs_url)
+            title_hint = a.get_text(" ", strip=True)[:120]
+            article_links.append((abs_url, title_hint))
+
+        logger.info("[%s] SPA 列表页解析出 %d 个候选文章链接", source.get("name"), len(article_links))
+        if not article_links:
+            return []
+
+        # 2. 逐篇渲染抓正文
+        consecutive_fail = 0
+        for abs_url, title_hint in article_links:
+            if consecutive_fail >= _FAIL_CIRCUIT:
+                logger.warning("[%s] 连续 %d 次渲染抓取失败，触发熔断，停止后续文章",
+                               source.get("name"), _FAIL_CIRCUIT)
+                break
+            try:
+                article_html = _spa_goto(page, abs_url)
+            except Exception as e:
+                consecutive_fail += 1
+                logger.warning("[%s] SPA 文章页渲染失败(%d/%d)：%s %s",
+                               source.get("name"), consecutive_fail, _FAIL_CIRCUIT, abs_url, e)
+                continue
+            item = _extract_item_from_html(abs_url, article_html, title_hint)
+            if item and len(item.content_text) >= _MIN_SUMMARY_LEN:
+                if not item.title:
+                    item.title = title_hint or abs_url
+                items.append(item)
+                consecutive_fail = 0
+                logger.debug("[%s] SPA 文章提取成功：%s 正文 %d 字符",
+                             source.get("name"), abs_url, len(item.content_text))
+            else:
+                consecutive_fail += 1
+                logger.warning("[%s] SPA 文章正文提取失败/过短(%d/%d)：%s",
+                               source.get("name"), consecutive_fail, _FAIL_CIRCUIT, abs_url)
+    except Exception as e:
+        logger.warning("[%s] SPA 抓取过程异常，已抓 %d 篇：%s", source.get("name"), len(items), e)
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+        pw.stop()
+
+    logger.info("SPA 列表 [%s] 抓取完成：%d 篇文章成功提取正文",
+                source.get("name"), len(items))
+    return items
+
+
 # ---------- B站搜索（wbi 签名） ----------
 # B站搜索结果是 SPA 动态渲染的，直接抓 HTML 拿不到数据。
 # 通过 wbi 签名调官方搜索 API 获取结果。
@@ -484,10 +620,23 @@ def _fetch_article_page_with_error(url: str) -> tuple[FetchItem | None, str | No
         logger.warning("抓取文章页失败 %s: %s", url, reason)
         return None, reason
 
+    item = _extract_item_from_html(url, html)
+    if not item:
+        logger.warning("正文提取彻底失败，返回空：%s", url)
+        return None, "正文提取失败（trafilatura 与 BeautifulSoup 均为空）"
+    logger.debug("文章页提取成功：%s 正文 %d 字符", url, len(item.content_text))
+    return item, None
+
+
+def _extract_item_from_html(url: str, html: str, title_hint: str | None = None) -> FetchItem | None:
+    """从已抓到的 HTML 提取 FetchItem（trafilatura 优先，BS4 兜底）。提取失败返回 None。
+
+    供 _fetch_article_page_with_error（HTTP 抓取）和 _fetch_spa_list（Playwright 渲染）
+    复用，避免正文提取逻辑重复。
+    """
     title, content_text, canonical, lang = _extract_with_trafilatura(html, url)
     if not content_text:
         logger.debug("trafilatura 提取为空，退回 BeautifulSoup：%s", url)
-        # trafilatura 提取失败，退回 BeautifulSoup 兜底
         soup = BeautifulSoup(html, "lxml")
         title = title or (soup.title.string.strip() if soup.title and soup.title.string else url)
         content_text = _fallback_text(soup)
@@ -495,12 +644,9 @@ def _fetch_article_page_with_error(url: str) -> tuple[FetchItem | None, str | No
         lang = lang or _meta(soup, "language") or _lang_from_html(soup)
 
     if not content_text:
-        logger.warning("正文提取彻底失败，返回空：%s", url)
-        return None, "正文提取失败（trafilatura 与 BeautifulSoup 均为空）"
-
-    logger.debug("文章页提取成功：%s 正文 %d 字符", url, len(content_text))
+        return None
     return FetchItem(
-        title=title or url,
+        title=(title or title_hint or url),
         url=url,
         canonical_url=canonical,
         author=None,
@@ -509,7 +655,7 @@ def _fetch_article_page_with_error(url: str) -> tuple[FetchItem | None, str | No
         raw_html=html,
         content_text=content_text,
         language=lang,
-    ), None
+    )
 
 
 def _extract_with_trafilatura(html: str, source_url: str) -> tuple[str | None, str, str | None, str | None]:

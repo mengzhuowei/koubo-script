@@ -16,6 +16,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 安装 Playwright Chromium 及其系统依赖，用于 SPA 站点（如机器之心）JS 渲染抓取
+# install-deps 用 apt 装 Chromium 运行所需的共享库；install 下载 Chromium 二进制
+RUN playwright install-deps chromium \
+    && playwright install chromium \
+    && rm -rf /var/lib/apt/lists/*
+
 # 再复制项目代码
 COPY app.py config.py ./
 COPY migrations/ ./migrations/
