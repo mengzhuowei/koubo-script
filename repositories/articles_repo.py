@@ -189,7 +189,7 @@ def list_unprocessed_articles(limit: int = 50) -> list[dict]:
         rows = conn.execute(
             "SELECT a.*, s.name AS source_name, s.level AS source_level "
             "FROM articles a LEFT JOIN sources s ON a.source_id = s.id "
-            "WHERE a.status = 'new' ORDER BY a.fetched_at ASC LIMIT %s",
+            "WHERE a.status = 'new' ORDER BY a.published_at DESC LIMIT %s",
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]

@@ -31,6 +31,7 @@
 - 标题：{title}
 - 摘要：{summary}
 - 来源层级：{source_level}
+- 文章发布时间：{published_at}
 - 实操价值：{actionable_value}
 - 风险提醒：{risk_notes}
 - 关键事实数：{facts_count}
