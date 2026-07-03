@@ -32,6 +32,7 @@ _MIN_SUMMARY_LEN = 200
 # 实测换 UA 无效，WAF 基于 TLS 指纹/JS challenge，回抓只会产生 403 噪音。
 _REFETCH_SKIP_HOSTS = {
     "openai.com",  # 旧博客 /index/ 和新 /blog/ 均返回 403
+    "qbitai.com",  # 量子位：RSS 摘要仅导语，回抓文章页必被 RemoteDisconnected 拒绝
 }
 
 # 429/5xx 重试配置：指数退避，避免被反爬限流直接放弃
