@@ -37,6 +37,44 @@
   <div class="panel-body" id="gen-progress-body"></div>
 </section>
 
+{% if research_card %}
+<section class="panel">
+  <div class="panel-head"><h2>资料卡</h2>
+    <a class="link" href="/topics/{{ topic.id }}#research" style="font-size:.9em">查看/编辑 →</a>
+  </div>
+  <div class="panel-body">
+    <div class="muted" style="margin-bottom:8px">
+      v{{ research_card.version }} ｜ 置信度：
+      <span class="tag tag-{{ research_card.confidence }}">{{ research_card.confidence }}</span>
+      ｜ 来源 {{ research_card.local_source_count + research_card.web_source_count }} 篇
+      {% if research_card.has_official_source %} ｜ 含官方源{% endif %}
+      ｜ {{ research_card.updated_at }}
+    </div>
+    <p><strong>{{ research_card.title }}</strong></p>
+    <pre class="body-text" style="max-height:8em;overflow:auto">{{ research_card.summary or '（无摘要）' }}</pre>
+    {% set rc = research_card.card or {} %}
+    {% if rc.risk_notes %}
+    <div style="margin-top:8px"><span class="muted">关键风险提醒：</span>
+      {% for r in rc.risk_notes %}{{ r }}{% if not loop.last %}；{% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    {% if research_card.confidence == 'low' %}
+    <div class="muted" style="margin-top:8px;color:#c0392b">⚠ 置信度较低，建议先回选题页刷新资料卡再生成脚本。</div>
+    {% endif %}
+  </div>
+</section>
+{% elif research_job %}
+<section class="panel">
+  <div class="panel-head"><h2>资料卡生成中</h2></div>
+  <div class="panel-body">
+    <div class="muted">任务 #{{ research_job.id }} 状态：
+      <span class="tag tag-{{ research_job.status }}">{{ research_job.status }}</span>
+    </div>
+    <div class="muted" style="margin-top:8px">资料卡生成完成后即可生成脚本。稍后刷新此页面。</div>
+  </div>
+</section>
+{% endif %}
+
 <section class="panel" id="scripts-section">
   <div class="panel-head"><h2>脚本版本</h2>
     {% if scripts|length >= 2 %}<a class="link" href="/topics/{{ topic.id }}/scripts/compare" style="font-size:.9em">版本对比 →</a>{% endif %}
@@ -84,9 +122,12 @@
     <div style="border-top:1px dashed var(--border); margin-top:12px; padding-top:12px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <strong>发布素材包</strong>
-        <form method="post" action="/scripts/{{ s.id }}/assets" style="margin:0">
-          <button class="btn btn-primary" type="submit">生成素材包</button>
-        </form>
+        <div style="display:flex;gap:8px">
+          <a class="btn btn-sm" href="/scripts/{{ s.id }}/fact-check">事实检查</a>
+          <form method="post" action="/scripts/{{ s.id }}/assets" style="margin:0">
+            <button class="btn btn-primary" type="submit">生成素材包</button>
+          </form>
+        </div>
       </div>
       {% if assets %}
       <div class="muted" style="margin-bottom:6px">最近生成：{{ assets.updated_at }}</div>

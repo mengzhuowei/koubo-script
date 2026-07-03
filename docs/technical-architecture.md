@@ -1,17 +1,17 @@
 # AI Agent Efficiency Coach Technical Architecture
 
-版本：V0.1
+版本：V0.2
 
-目标：用最简单的 Python 单体架构实现 AI Agent 选题、总结、脚本生成工作台。
+目标：用 Python 单体架构实现 AI Agent 选题、总结、脚本、发布素材包生成工作台。
 
 ## 1. 技术原则
 
 1. 优先本地可运行。
 2. 优先少依赖、少组件。
 3. 不做前后端分离。
-4. 数据存入 MySQL，通过 Docker 一键启动。
+4. 数据存入 MySQL；应用可通过 Docker 启动，MySQL 由宿主机或外部服务提供。
 5. 后台任务用 Python 自身能力实现。
-6. 检索先用 SQL，数据量变大后升级 MySQL FULLTEXT 或向量检索。
+6. 文章检索使用 MySQL FULLTEXT/ngram；后续可升级向量检索或语义聚类。
 7. 每个关键事实保留来源，降低幻觉风险。
 
 ## 2. 推荐技术栈
@@ -25,11 +25,11 @@
 | 数据库 | MySQL 8.0 |
 | 数据访问 | pymysql + DictCursor |
 | 后台任务 | MySQL jobs 表 + Python worker thread |
-| 后续定时任务（MVP 外） | APScheduler |
-| 抓取 | requests、feedparser、trafilatura、BeautifulSoup、Playwright |
+| 定时任务 | APScheduler（抓取调度默认开启，选题调度默认关闭） |
+| 抓取 | requests、feedparser、BeautifulSoup、lxml（trafilatura 作为依赖预留） |
 | LLM 调用 | OpenAI API 或可替换 provider |
 | 配置 | .env + pydantic-settings |
-| 容器化 | Docker + docker-compose（app + mysql 双服务） |
+| 容器化 | Docker + docker-compose（app 容器，MySQL 由宿主机或外部服务提供） |
 | 日志 | Python logging |
 
 ## 3. 应用架构
@@ -49,7 +49,8 @@ FastAPI Routes
         +--> Topic Generator
         +--> Scorer
         +--> Script Generator
-        +--> Fact Checker
+        +--> Assets Generator
+        +--> Scheduler
   |
   v
 Repositories
@@ -66,22 +67,29 @@ agent_script_radar/
 ├── config.py
 ├── requirements.txt
 ├── Dockerfile
-├── docker-compose.yml        # app + mysql 双服务编排
+├── docker-compose.yml        # app 容器编排，连接宿主机/外部 MySQL
 ├── .dockerignore
 ├── .env.example
 ├── migrations/
-│   └── 001_init.sql          # MySQL 8.0 方言
+│   ├── 001_init.sql          # MySQL 8.0 初始化 schema
+│   ├── 002_fulltext.sql      # articles FULLTEXT/ngram 索引
+│   └── 003_script_assets.sql # 发布素材包表
 ├── scripts/
 │   └── seed_sources.py
 ├── templates/
 │   ├── base.html
 │   ├── dashboard.html
 │   ├── sources.html
+│   ├── source_form.html
 │   ├── articles.html
+│   ├── article_detail.html
 │   ├── topics.html
 │   ├── topic_detail.html
 │   ├── settings.html
-│   └── script_editor.html
+│   ├── script_editor.html
+│   ├── script_compare.html
+│   ├── jobs.html
+│   └── jobs_table.html
 ├── static/
 │   ├── app.css
 │   └── app.js
@@ -91,6 +99,7 @@ agent_script_radar/
 │   ├── articles_repo.py
 │   ├── topics_repo.py
 │   ├── scripts_repo.py
+│   ├── assets_repo.py
 │   ├── settings_repo.py
 │   └── jobs_repo.py
 ├── services/
@@ -101,16 +110,15 @@ agent_script_radar/
 │   ├── topic_generator.py
 │   ├── scorer.py
 │   ├── script_generator.py
-│   └── fact_checker.py
+│   └── assets_generator.py
 ├── workers/
 │   ├── scheduler.py
 │   └── job_runner.py
 └── prompts/
     ├── content_card.md
     ├── topic_score.md
-    ├── script_douyin.md
-    ├── script_xiaohongshu.md
-    └── fact_check.md
+    ├── script_koubo.md
+    └── assets.md
 ```
 
 ## 5. 数据模型
@@ -144,8 +152,6 @@ type 可选值：
 ```text
 rss
 webpage
-github
-arxiv
 manual
 ```
 
@@ -158,7 +164,7 @@ B
 C
 ```
 
-config_json 用于保存不同来源类型的差异化配置，例如 GitHub query、arXiv 分类、排序方式、分页大小、是否需要 Playwright 等。last_cursor 和 last_seen_item_id 用于增量抓取，避免每次从头扫描。
+config_json 用于保存不同来源类型的差异化配置；当前 UI 支持 rss、webpage、manual。last_cursor 和 last_seen_item_id 用于后续增量抓取，避免每次从头扫描。
 
 ### 5.2 articles
 
@@ -314,7 +320,35 @@ CREATE UNIQUE INDEX idx_scripts_version ON scripts(topic_id, platform, format, d
 
 同一 topic、platform、format、duration 下，每次重新生成脚本时 version 递增，保留历史版本。
 
-### 5.7 creator_profile
+### 5.7 script_assets
+
+发布素材包表。每个脚本最多一条素材记录，重新生成时覆盖。
+
+```sql
+CREATE TABLE script_assets (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  script_id INT NOT NULL,
+  titles TEXT,
+  cover_texts TEXT,
+  description MEDIUMTEXT,
+  hashtags TEXT,
+  comment_questions TEXT,
+  pinned_comment VARCHAR(1024),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_assets_script FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE,
+  UNIQUE KEY uk_assets_script (script_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+字段说明：
+
+1. titles、cover_texts、hashtags、comment_questions 使用 JSON 字符串保存数组。
+2. description 保存发布简介。
+3. pinned_comment 保存置顶评论。
+4. 生成素材包为手动触发的 LLM 任务，不自动发布到平台。
+
+### 5.8 creator_profile
 
 账号人设配置表。
 
@@ -345,7 +379,7 @@ default_cta: 关注我，我会继续把复杂 AI Agent 技术拆成你能直接
 
 creator_profile 必须通过设置页可编辑。代码只能使用默认值做首次初始化，不允许在 prompt 或 service 中硬编码“AI效率教练”。
 
-### 5.8 llm_settings
+### 5.9 llm_settings
 
 模型配置表。
 
@@ -369,7 +403,7 @@ CREATE TABLE llm_settings (
 3. 应用首次启动时使用 .env 中的 DEFAULT_LLM_PROVIDER 和 DEFAULT_LLM_MODEL 初始化一条配置。
 4. 所有 LLM 调用都必须读取 llm_settings 当前配置。
 
-### 5.9 jobs
+### 5.10 jobs
 
 后台任务表。
 
@@ -401,10 +435,10 @@ job type 可选值：
 ```text
 fetch_source
 fetch_all_sources
-process_article
 generate_topic
+regenerate_topic_for_article
 generate_script
-fact_check_script
+generate_assets
 ```
 
 ## 6. 后台任务设计
@@ -439,14 +473,14 @@ COMMIT;
 
 `FOR UPDATE SKIP LOCKED` 让多个 worker 并发抢占时互不阻塞，被其他 worker 锁住的行直接跳过。
 
-任务运行时 worker 定期更新 heartbeat_at。若程序崩溃，启动时把超时的 running 任务恢复为 pending：
+任务运行时 worker 写入 heartbeat_at。当前单 worker 架构下，应用启动时会直接把所有 running 任务恢复为 pending，因为进程重启意味着旧 worker 已不存在：
 
 ```text
 status = running
-heartbeat_at < now - timeout
+-> status = pending
 ```
 
-locked_by 保存当前 worker 标识，方便排查任务卡住的问题。
+locked_by 保存当前 worker 标识，方便排查任务卡住的问题。heartbeat_at 保留给后续多 worker 或超时恢复策略使用。
 
 ### 6.2 并发策略
 
@@ -458,15 +492,20 @@ MVP 阶段默认单 worker，简化并发模型。MySQL 行级锁已为后续多
 2. LLM 任务 1 个并发。
 3. 长任务增加取消按钮。
 
-### 6.3 定时任务（MVP 外）
+### 6.3 定时任务
 
-定时任务不属于 MVP。后续稳定生产版可使用 APScheduler 创建任务，不直接执行业务。
+当前代码已接入 APScheduler。调度器只创建 job 入队，不直接执行业务，仍由 worker 消费。
+
+已实现两类调度：
+
+1. 到期来源抓取：默认开启。每隔 `SCHEDULER_FETCH_CHECK_INTERVAL_MINUTES` 分钟检查一次 `sources.last_fetched_at` 与 `fetch_interval_minutes`，为到期来源创建 `fetch_source` 任务。若该来源已有 pending/running 任务则跳过。
+2. 自动生成选题：默认关闭。开启 `SCHEDULER_TOPIC_ENABLED=true` 后，按 `SCHEDULER_TOPIC_CRON` 创建 `generate_topic` 任务。该任务会消耗 LLM，因此默认不自动触发。
 
 示例：
 
 ```text
-每天 09:00 创建 fetch_all_sources job
-每天 09:30 创建 generate_topic job
+每 30 分钟检查到期来源并创建 fetch_source job
+可选：每天 09:30 创建 generate_topic job
 ```
 
 ## 7. 抓取设计
@@ -477,8 +516,9 @@ MVP 阶段默认单 worker，简化并发模型。MySQL 行级锁已为后续多
 
 1. RSS/API。
 2. 静态网页抓取。
-3. Playwright 动态抓取。
-4. 手动录入。
+3. 手动录入。
+
+当前抓取服务支持 `rss`、`webpage`、`manual` 三种来源类型。动态网页、GitHub/arXiv/HN 专用 API 适配器属于后续增强。
 
 ### 7.2 去重策略
 
@@ -517,7 +557,7 @@ MVP 阶段使用可解释规则聚合：
 4. 同一集合内优先使用 S/A 级来源生成关键事实。
 5. 支持用户在文章详情页手动加入已有 topic。
 
-后续再考虑 MySQL FULLTEXT 相似搜索或向量聚类。
+后续再考虑向量聚类或更强语义相似度，用于跨来源选题聚合。
 
 ## 8. LLM 流程
 
@@ -529,7 +569,7 @@ Article Text
   -> Topic Card
   -> Score
   -> Script
-  -> Fact Check
+  -> Assets Pack（手动触发）
 ```
 
 ### 8.2 内容卡 Prompt 输入
@@ -582,9 +622,26 @@ Article Text
 7. 包含风险提醒。
 8. 结尾回到设置页配置的人设。
 
-### 8.5 后续事实校验（MVP 外）
+### 8.5 发布素材包生成
 
-事实校验不属于 MVP。后续质量增强阶段可先做三件事：
+素材包基于已保存脚本生成，手动触发，输出 JSON 后写入 script_assets。
+
+输出字段：
+
+```json
+{
+  "titles": ["标题1", "标题2", "标题3", "标题4", "标题5"],
+  "cover_texts": ["封面1", "封面2", "封面3"],
+  "description": "视频简介",
+  "hashtags": ["标签1", "标签2"],
+  "comment_questions": ["问题1", "问题2", "问题3"],
+  "pinned_comment": "置顶评论"
+}
+```
+
+### 8.6 后续事实校验（未实现）
+
+事实校验当前未实现。后续质量增强阶段可先做三件事：
 
 1. 抽取脚本中的事实性声明。
 2. 检查是否能在 topic_facts 或关联文章中找到来源。
@@ -613,13 +670,20 @@ Article Text
 GET  /                         首页
 GET  /sources                  来源库
 POST /sources                  新增来源
+GET  /sources/new              新增来源页
+POST /sources/fetch-all        抓取全部启用来源
 GET  /sources/{id}/edit        编辑来源页
 POST /sources/{id}             更新来源
+POST /sources/{id}/toggle      启用/停用来源
 POST /sources/{id}/fetch       抓取单个来源
 
 GET  /articles                 文章池
+POST /articles/bulk-ignore     批量忽略文章
 GET  /articles/{id}            文章详情
 POST /articles/{id}/ignore     忽略文章
+POST /articles/{id}/edit       人工修正标题/正文
+POST /articles/{id}/regenerate-topic  单篇文章重新生成选题
+POST /articles/{id}/add-to-topic      手动关联文章到选题
 
 GET  /topics                   选题库
 GET  /topics/{id}              选题详情
@@ -628,21 +692,22 @@ POST /topics/{id}/select       选中选题
 POST /topics/{id}/archive      归档选题
 
 GET  /topics/{id}/scripts      脚本编辑页
+GET  /topics/{id}/scripts/compare 脚本版本对比
 POST /topics/{id}/scripts      生成脚本
 POST /scripts/{id}             保存脚本
+POST /scripts/{id}/assets      生成发布素材包
 
 GET  /settings                 设置页
 POST /settings/profile         更新账号人设
 POST /settings/model           更新模型配置
 
 GET  /jobs                     任务列表
+POST /jobs/{id}/retry          重试任务
+GET  /jobs/{id}/status         查询任务状态
+GET  /healthz                  健康检查
 ```
 
-MVP 外后续路由：
-
-```text
-POST /scripts/{id}/fact-check  校验脚本
-```
+后续可新增事实校验路由，例如 `POST /scripts/{id}/fact-check`，当前代码未实现。
 
 ### 9.2 HTMX 局部刷新
 
@@ -655,7 +720,7 @@ POST /scripts/{id}/fact-check  校验脚本
 
 ## 10. 检索设计
 
-### 10.1 MVP SQL 检索
+### 10.1 文章池检索
 
 ```sql
 SELECT *
@@ -666,17 +731,27 @@ ORDER BY published_at DESC
 LIMIT 100;
 ```
 
-### 10.2 后续 FULLTEXT 升级（MVP 外）
+当前代码已通过 `002_fulltext.sql` 建立 MySQL FULLTEXT/ngram 索引：
 
 ```sql
-ALTER TABLE articles ADD FULLTEXT INDEX ft_articles_title_content (title, content_text);
-
-SELECT * FROM articles
-WHERE MATCH(title, content_text) AGAINST(%s IN NATURAL LANGUAGE MODE)
-ORDER BY published_at DESC LIMIT 100;
+CREATE FULLTEXT INDEX idx_articles_fulltext ON articles(title, content_text) WITH PARSER ngram;
 ```
 
-MySQL 8.0 InnoDB 内置 FULLTEXT 索引，ngram 分词器可支持中文，不增加额外组件。
+查询策略：
+
+```sql
+SELECT a.*, MATCH(a.title, a.content_text) AGAINST(%s IN BOOLEAN MODE) AS relevance
+FROM articles a
+WHERE MATCH(a.title, a.content_text) AGAINST(%s IN BOOLEAN MODE)
+ORDER BY relevance DESC, a.fetched_at DESC
+LIMIT %s OFFSET %s;
+```
+
+实现约束：
+
+1. 查询长度 >= 2 时使用 FULLTEXT。
+2. 查询长度 < 2 时回退 LIKE，避免 ngram 最小 token 限制导致查不到。
+3. 查询字符串用短语形式包裹，降低 `C++`、`GPT-4` 等特殊字符破坏 BOOLEAN MODE 的风险。
 
 ## 11. 配置设计
 
@@ -693,27 +768,29 @@ DB_PORT=3306
 DB_USER=koubo
 DB_PASSWORD=koubo
 DB_NAME=koubo
-# 仅 Docker compose 使用：MySQL 容器初始化参数
-MYSQL_ROOT_PASSWORD=rootpass
-MYSQL_DATABASE=koubo
-MYSQL_USER=koubo
-MYSQL_PASSWORD=koubo
 
 OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.openai.com/v1
 DEFAULT_LLM_PROVIDER=openai
 DEFAULT_LLM_MODEL=gpt-4o-mini
 FETCH_USER_AGENT=AgentScriptRadar/0.1
-JOB_HEARTBEAT_TIMEOUT_SECONDS=300
 JOB_POLL_INTERVAL_SECONDS=2.0
+
+SCHEDULER_ENABLED=true
+SCHEDULER_FETCH_CHECK_INTERVAL_MINUTES=30
+SCHEDULER_TOPIC_ENABLED=false
+SCHEDULER_TOPIC_CRON=30 9 * * *
+
 LOG_LEVEL=INFO
 ```
 
 说明：
 
 1. DEFAULT_LLM_PROVIDER 和 DEFAULT_LLM_MODEL 只用于首次初始化 llm_settings。应用运行后以页面保存的模型配置为准。
-2. Docker 运行时 compose 会自动覆盖 DB_HOST=mysql，并通过 MYSQL_DATABASE 让 MySQL 容器首次启动自动建库。
-3. 本地运行需先手动创建数据库：`CREATE DATABASE koubo CHARACTER SET utf8mb4;` 并建用户授权。
+2. Docker 运行时 compose 默认覆盖 DB_HOST=host.docker.internal，让 app 容器访问宿主机 MySQL。
+3. MySQL 不随 app 容器启动，首次部署需手动建库建用户。
+4. SCHEDULER_ENABLED 控制自动抓取调度；SCHEDULER_TOPIC_ENABLED 默认关闭，避免自动消耗 LLM。
+5. OPENAI_BASE_URL 当前作为预留配置存在；若要接入第三方 OpenAI 兼容网关，需要在 `services/llm.py` 中把 base_url 注入 OpenAI client。
 
 ## 12. 错误处理
 
@@ -766,7 +843,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-compose 会自动拉起 mysql:8.0 和 app 两个容器，MySQL 健康后 app 才启动。数据通过命名卷 `mysql-data` 持久化。
+compose 只启动 app 容器。MySQL 需由宿主机、远端服务或另一个容器提前提供。默认配置通过 `host.docker.internal` 访问宿主机 MySQL；如需访问远端或同网络 MySQL，可在 `.env` 中覆盖 DB_HOST。
 
 访问：
 
@@ -795,66 +872,47 @@ python app.py
 
 应用启动时会自动执行 migration 建表，并写入默认 creator_profile 与 llm_settings。
 
-## 15. MVP 开发顺序
+## 15. 当前实现里程碑
 
-### Step 1: 项目骨架
+### V0.1 核心闭环
 
-1. FastAPI app。
-2. Jinja2 base 模板。
-3. MySQL 初始化（migration + schema_migrations 幂等执行）。
-4. 首页。
+1. FastAPI + Jinja2 单体应用。
+2. MySQL 8.0 schema、migration 与 schema_migrations 幂等执行。
+3. 来源库 CRUD、启用/停用、单源抓取、抓取全部启用来源。
+4. RSS/普通网页抓取、正文提取、URL 规范化、content_hash/source_item/canonical_url 去重。
+5. 文章池列表、详情、搜索、来源筛选、分页、无正文筛选、单篇/批量忽略。
+6. 内容卡生成、文章摘要保存、topic/topic_facts/topic_articles 入库。
+7. 选题库筛选、选中/归档、脚本生成。
+8. 脚本版本保存、编辑、设置页人设和模型配置。
+9. MySQL jobs 队列、worker、重试、启动恢复和任务状态页。
 
-### Step 2: 来源库
+### V0.2 已补充能力
 
-1. sources 表。
-2. 来源列表页。
-3. 新增/编辑/停用来源。
+1. MySQL FULLTEXT/ngram 文章搜索。
+2. 单篇文章人工修正正文后重新生成选题。
+3. 近 7 天标题相似度去重与重复选题合并。
+4. 脚本版本对比。
+5. 发布素材包生成与 script_assets 存储。
+6. APScheduler 到期来源抓取调度；选题自动调度可配置但默认关闭。
+7. Docker app 容器化运行，连接宿主机或外部 MySQL。
+8. 种子来源脚本 `scripts/seed_sources.py`。
 
-### Step 3: 抓取与文章池
-
-1. RSS 抓取。
-2. 网页正文提取。
-3. 去重。
-4. 文章列表和详情。
-
-### Step 4: 内容卡
-
-1. LLM 封装。
-2. 内容卡 prompt。
-3. topics 和 topic_facts 入库。
-4. 选题库页面。
-
-### Step 5: 脚本生成
-
-1. creator_profile 和 llm_settings 默认配置。
-2. 脚本 prompt。
-3. scripts 入库。
-4. 脚本编辑页。
-
-### Step 6: 任务系统
-
-1. jobs 表。
-2. worker thread。
-3. 任务列表页。
-4. 手动创建/重试任务。
-
-说明：MVP 开发顺序到 Step 6 结束。以下能力均为 MVP 外 TODO，按 `agent-implementation-guide.md` 的开发边界处理。
-
-### MVP 外 TODO
+### 仍未实现 / 后续 TODO
 
 1. 事实校验。
-2. 发布素材包。
-3. MySQL FULLTEXT 全文搜索。
-4. 视频表现反馈录入。
-5. APScheduler 定时任务。
+2. 视频表现反馈录入。
+3. 选题评分自动校准。
+4. 多账号人设配置。
+5. 自动发布或平台 API 集成。
 
 ## 16. 后续可升级方向
 
-当 MVP 跑通后，再考虑：
+后续再考虑：
 
 1. MySQL 单机 -> MySQL 主从 / 云数据库 RDS。
-2. SQL LIKE -> MySQL FULLTEXT -> 向量检索。
+2. MySQL FULLTEXT -> 向量检索 / 语义聚类。
 3. 单 worker -> 多 worker（FOR UPDATE SKIP LOCKED 已就绪）。
 4. 本地应用 -> VPS 部署。
-5. 手动发布 -> 半自动发布素材管理。
-6. 单账号 -> 多账号人设配置。
+5. 发布素材包 -> 平台发布清单 / 半自动发布流程。
+6. 单账号人设 -> 多账号人设配置。
+7. 手动反馈录入 -> 自动化内容表现复盘。

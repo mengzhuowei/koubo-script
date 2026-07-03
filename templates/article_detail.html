@@ -23,6 +23,17 @@
       ｜ 语言：{{ article.language or '-' }}
     </div>
 
+    {% if tracking_job_id %}
+    <section class="panel" id="gen-progress" style="margin-bottom:12px;background:#f8f9fa">
+      <div class="panel-body">
+        <div id="gen-progress-body">
+          <span class="muted">选题生成中…</span>
+          <span class="tag tag-pending" id="job-status-tag">pending</span>
+        </div>
+      </div>
+    </section>
+    {% endif %}
+
     {% if linked_topics %}
     <div style="margin-bottom:12px">
       <div class="muted" style="margin-bottom:4px">关联选题（{{ linked_topics|length }}）：</div>
@@ -88,4 +99,47 @@
     </details>
   </div>
 </div>
+
+{% if tracking_job_id %}
+<script>
+(function() {
+  var jobId = {{ tracking_job_id }};
+  var pollInterval = 2000;  // 2 秒轮询，与 worker 拉取频率一致
+  var timer = null;
+
+  function poll() {
+    fetch('/jobs/' + jobId + '/status')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var tag = document.getElementById('job-status-tag');
+        var body = document.getElementById('gen-progress-body');
+        if (!body) return;
+        var status = d.status || 'unknown';
+        if (tag) {
+          tag.textContent = status;
+          tag.className = 'tag tag-' + status;
+        }
+        if (status === 'done') {
+          clearInterval(timer);
+          body.innerHTML = '<span class="muted">选题已生成，正在刷新页面…</span>';
+          // 跳到不带 job 参数的 URL，避免 reload 后仍带 ?job=xxx 触发无限轮询循环
+          setTimeout(function() {
+            window.location.replace(window.location.pathname);
+          }, 600);
+        } else if (status === 'failed') {
+          clearInterval(timer);
+          body.innerHTML = '<span style="color:#c0392b">选题生成失败：' + (d.error || '未知错误') +
+                           '</span><br><span class="muted">请检查任务日志或重试。</span>';
+        } else {
+          body.innerHTML = '<span class="muted">选题生成中…</span> <span class="tag tag-' + status + '">' + status + '</span>';
+        }
+      })
+      .catch(function() { /* 网络抖动忽略，下一轮重试 */ });
+  }
+
+  timer = setInterval(poll, pollInterval);
+  poll();  // 立即查一次
+})();
+</script>
+{% endif %}
 {% endblock %}

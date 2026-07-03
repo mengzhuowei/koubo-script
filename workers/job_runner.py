@@ -67,6 +67,10 @@ def _dispatch(jtype: str, payload: dict, job_id: int) -> None:
         _handle_generate_topic(job_id)
     elif jtype == "regenerate_topic_for_article":
         _handle_regenerate_topic_for_article(payload)
+    elif jtype == "generate_research_card":
+        _handle_generate_research_card(payload)
+    elif jtype == "refresh_research_card":
+        _handle_refresh_research_card(payload)
     elif jtype == "generate_script":
         _handle_generate_script(payload)
     elif jtype == "generate_assets":
@@ -157,6 +161,23 @@ def _handle_regenerate_topic_for_article(payload: dict) -> None:
     article_id = payload["article_id"]
     topic_id = regenerate_topic_for_article(article_id)
     logger.info("regenerated topic_id=%s for article_id=%s", topic_id, article_id)
+
+
+# ---------- 选题资料卡 ----------
+def _handle_generate_research_card(payload: dict) -> None:
+    """生成选题资料卡（本地检索 + LLM 整理）。"""
+    from services.research_card_generator import generate_research_card
+    topic_id = payload["topic_id"]
+    card_id = generate_research_card(topic_id)
+    logger.info("generated research_card_id=%s for topic_id=%s", card_id, topic_id)
+
+
+def _handle_refresh_research_card(payload: dict) -> None:
+    """刷新选题资料卡（用户新增关联文章或手动刷新时触发，生成新版本）。"""
+    from services.research_card_generator import generate_research_card
+    topic_id = payload["topic_id"]
+    card_id = generate_research_card(topic_id)
+    logger.info("refreshed research_card_id=%s for topic_id=%s", card_id, topic_id)
 
 
 # ---------- 脚本生成 ----------

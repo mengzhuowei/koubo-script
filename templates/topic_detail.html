@@ -20,6 +20,142 @@
 </div>
 
 <section class="panel">
+  <div class="panel-head"><h2>选题研究</h2>
+    {% if research_card %}
+    <form method="post" action="/topics/{{ topic.id }}/refresh-research-card" style="display:inline">
+      <button class="btn btn-sm btn-primary" type="submit">刷新资料卡</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="panel-body">
+    {# tracking_job_id：手动刷新带 ?job=xxx；research_job：自动触发入队但无 job 参数。两者都需轮询。
+       job 已 done/failed 时不显示进度面板（避免刷新后仍显示）。#}
+    {% set auto_job_active = research_job and research_job.status in ('pending', 'running') %}
+    {% set poll_job_id = tracking_job_id or (research_job.id if auto_job_active else 0) %}
+    {% if poll_job_id %}
+    <div id="gen-progress-body" style="margin-bottom:12px;padding:8px 12px;background:#f8f9fa;border-radius:4px">
+      <span class="muted">资料卡生成中…</span>
+      <span class="tag tag-pending" id="job-status-tag">pending</span>
+    </div>
+    {% endif %}
+    {% if research_card %}
+    <div class="muted" style="margin-bottom:8px">
+      资料卡 v{{ research_card.version }} ｜ 置信度：
+      <span class="tag tag-{{ research_card.confidence }}">{{ research_card.confidence }}</span>
+      ｜ 本地来源 {{ research_card.local_source_count }} 篇
+      {% if research_card.web_source_count > 0 %} ｜ 联网来源 {{ research_card.web_source_count }} 篇{% endif %}
+      {% if research_card.has_official_source %} ｜ 含官方源{% endif %}
+      ｜ 生成于 {{ research_card.updated_at }}
+      {% if research_card.needs_refresh %} ｜ <span class="tag tag-needs_refresh">建议刷新</span>{% endif %}
+    </div>
+    <p><strong>{{ research_card.title }}</strong></p>
+    <pre class="body-text">{{ research_card.summary or '（无摘要）' }}</pre>
+
+    {% set rc = research_card.card or {} %}
+    {% if rc.efficiency_angle %}
+    <p style="margin-top:12px"><strong>效率角度：</strong>{{ rc.efficiency_angle }}</p>
+    {% endif %}
+    {% if rc.workflow_example %}
+    <p style="margin-top:12px"><strong>工作流案例：</strong>{{ rc.workflow_example }}</p>
+    {% endif %}
+    {% if rc.core_facts %}
+    <p style="margin-top:12px"><strong>关键事实：</strong></p>
+    <ul class="facts">
+      {% for f in rc.core_facts %}
+      <li>
+        <div>{{ f.claim }} <span class="muted">（{{ f.confidence }}）</span></div>
+        <div class="muted"><a href="{{ f.source_url }}" target="_blank" rel="noopener">{{ f.source_url }}</a></div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if rc.script_hooks %}
+    <p style="margin-top:12px"><strong>开头钩子参考：</strong></p>
+    <ul class="facts">
+      {% for h in rc.script_hooks %}<li>{{ h }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% if rc.risk_notes %}
+    <p style="margin-top:12px"><strong>风险提醒：</strong></p>
+    <ul class="facts">
+      {% for r in rc.risk_notes %}<li>{{ r }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% if rc.copyable_prompt %}
+    <p style="margin-top:12px"><strong>可复制提示词：</strong>「{{ rc.copyable_prompt }}」</p>
+    {% endif %}
+
+    {% if research_sources %}
+    <p style="margin-top:12px"><strong>来源列表（{{ research_sources|length }}）：</strong></p>
+    <ul class="facts">
+      {% for s in research_sources %}
+      <li>
+        <div>[{{ s.source_level or '-' }}级] {{ s.source_title or '（无标题）' }}</div>
+        <div class="muted">
+          <a href="{{ s.source_url }}" target="_blank" rel="noopener">{{ s.source_url }}</a>
+          ｜ {{ s.source_name or '-' }} ｜ {{ s.published_at or '-' }}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    <details style="margin-top:16px">
+      <summary class="link">编辑资料卡</summary>
+      <form method="post" action="/topics/{{ topic.id }}/research-card" style="margin-top:8px">
+        <div class="form-row">
+          <label>标题</label>
+          <input type="text" name="title" value="{{ research_card.title }}" required style="width:100%">
+        </div>
+        <div class="form-row">
+          <label>摘要</label>
+          <textarea name="summary" rows="4" style="width:100%;font-family:inherit">{{ research_card.summary or '' }}</textarea>
+        </div>
+        <div class="form-row">
+          <label>置信度</label>
+          <select name="confidence">
+            {% for c in ['high', 'medium', 'low'] %}
+            <option value="{{ c }}" {% if research_card.confidence == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-row">
+          <label>资料卡 JSON（完整结构，可手动增删字段）</label>
+          <textarea name="card_json" rows="20" style="width:100%;font-family:monospace;font-size:12px">{{ research_card.card_json }}</textarea>
+        </div>
+        <button class="btn btn-primary" type="submit">保存资料卡</button>
+      </form>
+    </details>
+
+    {% elif research_job %}
+    <div class="muted">资料卡生成中…任务 #{{ research_job.id }} 状态：
+      <span class="tag tag-{{ research_job.status }}">{{ research_job.status }}</span>
+    </div>
+    <div class="muted" style="margin-top:8px">稍后刷新页面查看。生成失败时仍可在脚本页选择"直接生成脚本"作为兜底。</div>
+    {% else %}
+    <div class="muted">尚无资料卡。进入脚本页时会自动生成。</div>
+    {% endif %}
+
+    {% if web_search_status %}
+    <div class="muted" style="margin-top:12px;padding-top:8px;border-top:1px dashed #ddd">
+      联网搜索：
+      {% if web_search_status.available %}
+        <span class="tag tag-high">已启用</span>
+        ｜ 本月 {{ web_search_status.monthly_used }}/{{ web_search_status.monthly_budget }} credits
+        ｜ 本选题 {{ web_search_status.topic_used }}/{{ web_search_status.topic_budget }}
+      {% elif web_search_status.enabled and not web_search_status.configured %}
+        <span class="tag tag-low">未配置 Key</span>
+        已开启但未配置 TAVILY_API_KEY
+      {% else %}
+        <span class="tag">未启用</span>
+        仅用本地资料
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="panel">
   <div class="panel-head"><h2>内容卡</h2></div>
   <div class="panel-body">
     {% if topic.one_line_takeaway %}
@@ -77,4 +213,44 @@
     {% endif %}
   </div>
 </section>
+
+{% set auto_job_active = research_job and research_job.status in ('pending', 'running') %}
+{% set poll_job_id = tracking_job_id or (research_job.id if auto_job_active else 0) %}
+{% if poll_job_id %}
+<script>
+(function() {
+  var jobId = {{ poll_job_id }};
+  var pollInterval = 2000;  // 2 秒轮询，与 worker 拉取频率一致
+  var timer = null;
+
+  function poll() {
+    fetch('/jobs/' + jobId + '/status')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var body = document.getElementById('gen-progress-body');
+        if (!body) return;
+        var status = d.status || 'unknown';
+        if (status === 'done') {
+          clearInterval(timer);
+          body.innerHTML = '<span class="muted">资料卡已生成，正在刷新页面…</span>';
+          // 跳到不带 job 参数的 URL，避免 reload 后仍带 ?job=xxx 触发无限轮询循环
+          setTimeout(function() {
+            window.location.replace(window.location.pathname);
+          }, 600);
+        } else if (status === 'failed') {
+          clearInterval(timer);
+          body.innerHTML = '<span style="color:#c0392b">资料卡生成失败：' + (d.error || '未知错误') +
+                           '</span><br><span class="muted">请检查任务日志或重试。</span>';
+        } else {
+          body.innerHTML = '<span class="muted">资料卡生成中…</span> <span class="tag tag-' + status + '">' + status + '</span>';
+        }
+      })
+      .catch(function() { /* 网络抖动忽略，下一轮重试 */ });
+  }
+
+  timer = setInterval(poll, pollInterval);
+  poll();
+})();
+</script>
+{% endif %}
 {% endblock %}

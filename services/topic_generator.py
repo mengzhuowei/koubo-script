@@ -234,7 +234,18 @@ def _persist_card(article: dict, card: dict, recent_titles: list[dict]) -> tuple
     mark_processed(article["id"])
     # 增量加入去重池，捕获同批次内重复
     recent_titles.append({"id": topic_id, "title": title})
+    # 新建选题后自动入队资料卡生成，无需用户进选题页再触发
+    _enqueue_research_card(topic_id)
     return topic_id, True
+
+
+def _enqueue_research_card(topic_id: int) -> None:
+    """新建选题后入队资料卡生成任务。已有 pending/running 任务时跳过避免重复。"""
+    from repositories.jobs_repo import enqueue
+    from repositories.research_cards_repo import has_active_research_job
+    if has_active_research_job(topic_id):
+        return
+    enqueue("generate_research_card", {"topic_id": topic_id})
 
 
 def _int_or_none(v) -> int | None:

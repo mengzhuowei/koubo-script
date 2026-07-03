@@ -160,13 +160,14 @@ def articles_bulk_ignore(request: Request, article_ids: list[int] = Form(default
 
 
 @app.get("/articles/{article_id}", response_class=HTMLResponse)
-def article_detail(request: Request, article_id: int):
+def article_detail(request: Request, article_id: int, job: int = 0):
     from repositories.articles_repo import get_article
     from repositories.topics_repo import list_topics_for_article
     return render(request, "article_detail.html", {
         "active": "articles",
         "article": get_article(article_id),
         "linked_topics": list_topics_for_article(article_id),
+        "tracking_job_id": job,
     })
 
 
@@ -187,16 +188,19 @@ def article_edit(article_id: int, title: str = Form(...), content_text: str = Fo
 
 @app.post("/articles/{article_id}/regenerate-topic")
 def article_regenerate_topic(article_id: int):
-    """针对单篇文章重新生成选题，覆盖旧选题。入队后跳到任务页跟踪进度。"""
+    """针对单篇文章重新生成选题，覆盖旧选题。入队后跳回文章详情页带 job 参数自动跟踪进度。"""
     from repositories.jobs_repo import enqueue
-    enqueue("regenerate_topic_for_article", {"article_id": article_id})
-    return RedirectResponse(url="/jobs", status_code=303)
+    job_id = enqueue("regenerate_topic_for_article", {"article_id": article_id})
+    return RedirectResponse(url=f"/articles/{article_id}?job={job_id}", status_code=303)
 
 
 @app.post("/articles/{article_id}/add-to-topic")
 def article_add_to_topic(article_id: int, topic_id: int = Form(...)):
     from repositories.topics_repo import add_article_to_topic
+    from repositories.research_cards_repo import mark_needs_refresh
     add_article_to_topic(topic_id, article_id)
+    # 选题新增关联文章后，资料卡标记为"建议刷新"
+    mark_needs_refresh(topic_id)
     return RedirectResponse(url=f"/topics/{topic_id}", status_code=303)
 
 
@@ -216,11 +220,29 @@ def topics_page(request: Request, status: str = "", category: str = "",
 
 
 @app.get("/topics/{topic_id}", response_class=HTMLResponse)
-def topic_detail(request: Request, topic_id: int):
+def topic_detail(request: Request, topic_id: int, job: int = 0):
     from repositories.topics_repo import get_topic_with_facts_and_articles
+    from repositories.research_cards_repo import get_latest_card_for_topic, get_sources_for_card, has_active_research_job
+    from repositories.jobs_repo import latest_job_by_payload
+    from repositories.web_search_repo import get_budget_status
+    topic = get_topic_with_facts_and_articles(topic_id)
+    research_card = get_latest_card_for_topic(topic_id)
+    research_sources = get_sources_for_card(research_card["id"]) if research_card else []
+    # 自动触发：无资料卡且无进行中的任务时，后台入队生成
+    research_job = None
+    if not research_card and not has_active_research_job(topic_id):
+        from repositories.jobs_repo import enqueue
+        enqueue("generate_research_card", {"topic_id": topic_id})
+    if not research_card:
+        research_job = latest_job_by_payload("generate_research_card", "topic_id", topic_id)
     return render(request, "topic_detail.html", {
         "active": "topics",
-        "topic": get_topic_with_facts_and_articles(topic_id),
+        "topic": topic,
+        "research_card": research_card,
+        "research_sources": research_sources,
+        "research_job": research_job,
+        "tracking_job_id": job,
+        "web_search_status": get_budget_status(topic_id),
     })
 
 
@@ -243,6 +265,33 @@ def topic_archive(topic_id: int):
     from repositories.topics_repo import set_topic_status
     set_topic_status(topic_id, "archived")
     return RedirectResponse(url="/topics", status_code=303)
+
+
+@app.post("/topics/{topic_id}/refresh-research-card")
+def topic_refresh_research_card(topic_id: int):
+    """手动刷新资料卡，生成新版本。入队后跳回选题页带 job 参数自动跟踪进度。"""
+    from repositories.jobs_repo import enqueue
+    job_id = enqueue("refresh_research_card", {"topic_id": topic_id})
+    return RedirectResponse(url=f"/topics/{topic_id}?job={job_id}", status_code=303)
+
+
+@app.post("/topics/{topic_id}/research-card")
+def topic_edit_research_card(topic_id: int, title: str = Form(...), summary: str = Form(""),
+                             card_json: str = Form(""), confidence: str = Form("medium")):
+    """人工编辑资料卡内容。保存后再次生成脚本会使用最新资料卡。"""
+    import json as _json
+    from repositories.research_cards_repo import get_latest_card_for_topic, update_card_content
+    card = get_latest_card_for_topic(topic_id)
+    if not card:
+        return RedirectResponse(url=f"/topics/{topic_id}", status_code=303)
+    try:
+        card_data = _json.loads(card_json) if card_json.strip() else card.get("card") or {}
+    except _json.JSONDecodeError:
+        # JSON 解析失败时保留原内容，避免误清空
+        card_data = card.get("card") or {}
+    update_card_content(card["id"], title=title, summary=summary,
+                        card_json=card_data, confidence=confidence)
+    return RedirectResponse(url=f"/topics/{topic_id}", status_code=303)
 
 
 # ---------- 脚本 ----------
@@ -274,20 +323,37 @@ def script_editor(request: Request, topic_id: int, job: int = 0):
     from repositories.topics_repo import get_topic_with_facts_and_articles
     from repositories.scripts_repo import list_scripts_for_topic
     from repositories.assets_repo import list_assets_for_scripts
+    from repositories.research_cards_repo import get_latest_card_for_topic, has_active_research_job
+    from repositories.jobs_repo import latest_job_by_payload
     scripts = list_scripts_for_topic(topic_id)
     assets_map = list_assets_for_scripts([s["id"] for s in scripts])
+    research_card = get_latest_card_for_topic(topic_id)
+    # 无资料卡且无进行中任务时，自动入队生成
+    research_job = None
+    if not research_card and not has_active_research_job(topic_id):
+        from repositories.jobs_repo import enqueue
+        enqueue("generate_research_card", {"topic_id": topic_id})
+    if not research_card:
+        research_job = latest_job_by_payload("generate_research_card", "topic_id", topic_id)
     return render(request, "script_editor.html", {
         "active": "topics",
         "topic": get_topic_with_facts_and_articles(topic_id),
         "scripts": scripts,
         "assets_map": assets_map,
         "tracking_job_id": job,
+        "research_card": research_card,
+        "research_job": research_job,
     })
 
 
 @app.post("/topics/{topic_id}/scripts")
 def script_generate(topic_id: int, platform: str = Form(...), format: str = Form(...), duration: int = Form(...)):
     from repositories.jobs_repo import enqueue
+    from repositories.research_cards_repo import get_latest_card_for_topic, has_active_research_job
+    # 生成脚本前检查资料卡：无资料卡且无进行中任务时，先入队资料卡生成，跳回脚本页等待
+    if not get_latest_card_for_topic(topic_id) and not has_active_research_job(topic_id):
+        enqueue("generate_research_card", {"topic_id": topic_id})
+        return RedirectResponse(url=f"/topics/{topic_id}/scripts", status_code=303)
     job_id = enqueue("generate_script", {"topic_id": topic_id, "platform": platform, "format": format, "duration": duration})
     return RedirectResponse(url=f"/topics/{topic_id}/scripts?job={job_id}", status_code=303)
 
@@ -315,6 +381,46 @@ def script_generate_assets(script_id: int):
     topic_id = existing.get("topic_id") if existing else None
     target = f"/topics/{topic_id}/scripts?job={job_id}" if topic_id else f"/jobs"
     return RedirectResponse(url=target, status_code=303)
+
+
+@app.get("/scripts/{script_id}/fact-check", response_class=HTMLResponse)
+def script_fact_check(request: Request, script_id: int):
+    """脚本事实引用检查（V0.4）：检查脚本正文中的具体事实是否有资料卡来源支撑。"""
+    from repositories.scripts_repo import get_script
+    from repositories.research_cards_repo import get_card, get_sources_for_card
+    from services.fact_checker import run_full_check
+    from services.credibility_scorer import score_research_card
+
+    script = get_script(script_id)
+    if not script:
+        return RedirectResponse(url="/topics", status_code=303)
+
+    topic_id = script.get("topic_id")
+    research_card = None
+    credibility = None
+    fact_result = None
+
+    if script.get("research_card_id"):
+        research_card = get_card(script["research_card_id"])
+    if not research_card and topic_id:
+        from repositories.research_cards_repo import get_latest_card_for_topic
+        research_card = get_latest_card_for_topic(topic_id)
+
+    if research_card:
+        sources = get_sources_for_card(research_card["id"])
+        credibility = score_research_card(research_card.get("card") or {}, sources)
+        fact_result = run_full_check(
+            script_body=script.get("body") or "",
+            card_data=research_card.get("card") or {},
+        )
+
+    return render(request, "fact_check.html", {
+        "active": "topics",
+        "script": script,
+        "research_card": research_card,
+        "credibility": credibility,
+        "fact_result": fact_result,
+    })
 
 
 # ---------- 设置 ----------

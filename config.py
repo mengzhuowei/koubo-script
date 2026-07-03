@@ -34,5 +34,15 @@ class Settings(BaseSettings):
     scheduler_topic_enabled: bool = False
     scheduler_topic_cron: str = "30 9 * * *"
 
+    # 联网搜索（V0.3）。默认关闭，需配置 TAVILY_API_KEY 并开启开关才会发起联网搜索。
+    web_search_enabled: bool = False
+    web_search_provider: str = "tavily"
+    tavily_api_key: str = ""
+    tavily_search_depth: str = "basic"  # basic=1 credit, advanced=2 credits
+    tavily_max_results: int = 10
+    tavily_extract_max_urls: int = 5  # 每 5 个 URL 约 1 credit
+    tavily_monthly_credit_budget: int = 800  # 预留 200 安全余量
+    tavily_per_topic_credit_budget: int = 3
+
 
 settings = Settings()

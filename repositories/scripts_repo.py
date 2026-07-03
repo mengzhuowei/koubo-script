@@ -27,17 +27,18 @@ def next_version(topic_id: int, platform: str, fmt: str, duration: int) -> int:
 def create_script(*, topic_id: int, platform: str, fmt: str, duration: int, version: int,
                   title: str | None, hook: str | None, body: str, cta: str | None,
                   cover_text: str | None, description: str | None,
-                  hashtags: list[str] | None) -> int:
+                  hashtags: list[str] | None, research_card_id: int | None = None) -> int:
     conn = get_conn()
     try:
         cur = conn.execute(
             """INSERT INTO scripts
                (topic_id, platform, format, duration, version, title, hook, body, cta,
-                cover_text, description, hashtags)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                cover_text, description, hashtags, research_card_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (topic_id, platform, fmt, duration, version, title, hook, body, cta,
              cover_text, description,
-             json.dumps(hashtags, ensure_ascii=False) if hashtags else None),
+             json.dumps(hashtags, ensure_ascii=False) if hashtags else None,
+             research_card_id),
         )
         return cur.lastrowid
     finally:

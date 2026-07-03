@@ -11,6 +11,14 @@ from services.llm import LLMError, chat_json, get_profile_context, render_prompt
 logger = logging.getLogger(__name__)
 
 PROMPT_PATH = BASE_DIR / "prompts" / "assets.md"
+_prompt_cache: str | None = None
+
+
+def _load_prompt() -> str:
+    global _prompt_cache
+    if _prompt_cache is None:
+        _prompt_cache = PROMPT_PATH.read_text(encoding="utf-8")
+    return _prompt_cache
 
 
 def generate_assets_for_script(script_id: int) -> int:
@@ -19,7 +27,7 @@ def generate_assets_for_script(script_id: int) -> int:
     if not script:
         raise ValueError(f"script {script_id} 不存在")
 
-    template = PROMPT_PATH.read_text(encoding="utf-8")
+    template = _load_prompt()
     prompt = render_prompt(
         template,
         profile=get_profile_context(),

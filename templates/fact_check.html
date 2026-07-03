@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}事实检查 · 口播雷达{% endblock %}
+{% block content %}
+<a class="link" href="/topics/{{ script.topic_id }}/scripts">← 返回脚本列表</a>
+<h1 class="page-title">事实检查</h1>
+<div class="muted" style="margin-bottom:16px">脚本：{{ script.title }}（v{{ script.version }}）</div>
+
+{% if not research_card %}
+<section class="panel">
+  <div class="panel-body">
+    <div class="empty">该脚本无关联资料卡，无法执行事实检查。请先生成资料卡。</div>
+  </div>
+</section>
+{% else %}
+
+{% if credibility %}
+<section class="panel">
+  <div class="panel-head"><h2>来源可信度</h2></div>
+  <div class="panel-body">
+    <div class="muted" style="margin-bottom:8px">
+      平均可信度：<strong>{{ credibility.avg_score }}/100</strong>
+      {% if credibility.has_official_source %} ｜ <span class="tag tag-high">含官方源</span>{% endif %}
+    </div>
+    <p><strong>建议：</strong>{{ credibility.recommendation }}</p>
+    {% if credibility.source_scores %}
+    <table class="table" style="margin-top:12px">
+      <thead><tr><th>分数</th><th>标题</th><th>等级</th><th>URL</th></tr></thead>
+      <tbody>
+      {% for s in credibility.source_scores %}
+      <tr>
+        <td><strong>{{ s.score }}</strong></td>
+        <td>{{ s.title or '（无标题）' }}</td>
+        <td>{% if s.level %}<span class="badge-level badge-level-{{ s.level }}">{{ s.level }}</span>{% else %}-{% endif %}</td>
+        <td class="muted" style="max-width:300px;word-break:break-all"><a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.url }}</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% if fact_result %}
+<section class="panel">
+  <div class="panel-head"><h2>事实检查结果</h2>
+    <span class="tag tag-{{ fact_result.risk_level }}">风险：{{ fact_result.risk_level }}</span>
+  </div>
+  <div class="panel-body">
+    <div class="muted" style="margin-bottom:12px">
+      资料卡事实 {{ fact_result.total_facts }} 条，已验证 {{ fact_result.verified_facts }} 条
+    </div>
+
+    {% if fact_result.conflicts %}
+    <h3 style="margin-top:12px;color:#c0392b">事实冲突（{{ fact_result.conflicts|length }}）</h3>
+    <ul class="facts">
+      {% for c in fact_result.conflicts %}
+      <li>
+        <div style="color:#c0392b">{{ c.description }}</div>
+        <div class="muted">事实A：{{ c.fact_a }}</div>
+        <div class="muted">事实B：{{ c.fact_b }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p style="margin-top:12px"><span class="tag tag-high">无冲突</span> 资料卡内事实无明显矛盾。</p>
+    {% endif %}
+
+    {% if fact_result.unverified_claims %}
+    <h3 style="margin-top:16px;color:#e67e22">脚本中未验证的事实（{{ fact_result.unverified_claims|length }}）</h3>
+    <div class="muted" style="margin-bottom:8px">以下脚本中提到的具体数值未在资料卡来源中找到，建议人工核实：</div>
+    <ul class="facts">
+      {% for u in fact_result.unverified_claims %}
+      <li>
+        <div><span class="tag">{{ u.fact_type }}</span> <strong>{{ u.value }}</strong></div>
+        <div class="muted">{{ u.claim }}</div>
+        <div class="muted" style="color:#e67e22">{{ u.suggestion }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p style="margin-top:12px"><span class="tag tag-high">全部验证</span> 脚本中的具体事实均在资料卡来源中找到。</p>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% endif %}
+{% endblock %}
