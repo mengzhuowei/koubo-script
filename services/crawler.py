@@ -1,11 +1,14 @@
 """抓取服务：支持 RSS 与普通网页。返回标准化的文章条目列表。"""
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlparse
+from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlsplit
 
 import feedparser
 import requests
@@ -125,6 +128,8 @@ def fetch_source(source: dict) -> list[FetchItem]:
         return _fetch_webpage(source)
     if stype == "webpage_list":
         return _fetch_webpage_list(source)
+    if stype == "bilibili_search":
+        return _fetch_bilibili_search(source)
     if stype == "manual":
         return []
     raise ValueError(f"不支持的来源类型：{stype}")
@@ -217,7 +222,7 @@ def _fetch_webpage(source: dict) -> list[FetchItem]:
         return [FetchItem(
             title=title, url=url, canonical_url=_extract_canonical(url, html),
             author=_meta(soup, "author"),
-            published_at=_meta(soup, "article:published_time") or _meta(soup, "date"),
+            published_at=_normalize_datetime(_meta(soup, "article:published_time") or _meta(soup, "date")),
             source_item_id=_extract_canonical(url, html) or url, raw_html=html,
             content_text=_fallback_text(soup),
             language=_meta(soup, "language") or _lang_from_html(soup),
@@ -306,6 +311,150 @@ def _fetch_webpage_list(source: dict) -> list[FetchItem]:
 
     logger.info("列表网页 [%s] 抓取完成：%d 篇文章，其中 %d 篇成功提取正文",
                 source.get("name"), len(items), refetch_count)
+    return items
+
+
+# ---------- B站搜索（wbi 签名） ----------
+# B站搜索结果是 SPA 动态渲染的，直接抓 HTML 拿不到数据。
+# 通过 wbi 签名调官方搜索 API 获取结果。
+_MIXIN_KEY_ENC_TAB = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
+    27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
+    37, 36, 25, 24, 11, 44, 26, 4, 20, 21, 16, 34, 6, 48, 7, 40,
+    22, 17, 30, 1, 51, 57, 52, 0, 55, 54, 60, 59, 61, 56, 63, 62,
+]
+_WBI_STRIP_CHARS = str.maketrans("", "", "!'()*_")
+_WBI_KEYS_TTL = 3600  # wbi keys 缓存 1 小时
+_wbi_keys_cache: tuple[str, str, float] | None = None  # (img_key, sub_key, expire_ts)
+
+BILI_SEARCH_API = "https://api.bilibili.com/x/web-interface/wbi/search/type"
+BILI_NAV_API = "https://api.bilibili.com/x/web-interface/nav"
+
+_bili_session: requests.Session | None = None
+
+
+def _get_bili_session() -> requests.Session:
+    """获取带 cookie 的 B站 session（缓存）。
+
+    B站搜索 API 在无 cookie 时返回空结果，需要先访问首页获取 buvid3 等 cookie。
+    """
+    global _bili_session
+    if _bili_session is not None:
+        return _bili_session
+    sess = requests.Session()
+    sess.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": "https://search.bilibili.com",
+        "Origin": "https://search.bilibili.com",
+    })
+    try:
+        _throttle_for_host("https://www.bilibili.com")
+        sess.get("https://www.bilibili.com", timeout=TIMEOUT)
+        logger.debug("B站 cookie 获取成功：%s", list(sess.cookies.keys()))
+    except Exception as e:
+        logger.warning("B站首页访问失败，无 cookie 继续：%s", e)
+    _bili_session = sess
+    return sess
+
+
+def _get_wbi_keys() -> tuple[str, str]:
+    """获取 B站 wbi 签名密钥（img_key + sub_key），缓存 1 小时。"""
+    global _wbi_keys_cache
+    now = time.time()
+    if _wbi_keys_cache and now < _wbi_keys_cache[2]:
+        return _wbi_keys_cache[0], _wbi_keys_cache[1]
+    resp = _http_get(BILI_NAV_API)
+    resp.raise_for_status()
+    wbi_img = resp.json().get("data", {}).get("wbi_img", {})
+    img_key = (wbi_img.get("img_url") or "").rsplit("/", 1)[-1].split(".")[0]
+    sub_key = (wbi_img.get("sub_url") or "").rsplit("/", 1)[-1].split(".")[0]
+    if not img_key or not sub_key:
+        if _wbi_keys_cache:
+            return _wbi_keys_cache[0], _wbi_keys_cache[1]
+        raise ValueError("nav API 未返回有效的 wbi keys")
+    _wbi_keys_cache = (img_key, sub_key, now + _WBI_KEYS_TTL)
+    return img_key, sub_key
+
+
+def _get_mixin_key(orig: str) -> str:
+    """用固定的重排表从 img_key+sub_key 生成 32 位 mixin_key。"""
+    return "".join(orig[i] for i in _MIXIN_KEY_ENC_TAB)[:32]
+
+
+def _enc_wbi(params: dict, img_key: str, sub_key: str) -> dict:
+    """对请求参数做 wbi 签名，返回附加了 wts 和 w_rid 的参数字典。"""
+    mixin_key = _get_mixin_key(img_key + sub_key)
+    params = {k: str(v).translate(_WBI_STRIP_CHARS) for k, v in params.items()}
+    params["wts"] = str(round(time.time()))
+    params = dict(sorted(params.items()))
+    query = urlencode(params)
+    params["w_rid"] = hashlib.md5((query + mixin_key).encode()).hexdigest()
+    return params
+
+
+def _fetch_bilibili_search(source: dict) -> list[FetchItem]:
+    """B站搜索：通过 wbi 签名调官方搜索 API，返回视频结果列表。
+
+    source.url 格式如 https://search.bilibili.com/all?keyword=AI%20Agent，
+    从 query 参数提取搜索关键词，调搜索 API 获取结果。
+    """
+    url = source["url"]
+    keyword = parse_qs(urlsplit(url).query).get("keyword", [""])[0]
+    if not keyword:
+        kw_field = source.get("keywords") or ""
+        keyword = kw_field.split(",")[0].strip() if kw_field else ""
+    if not keyword:
+        logger.warning("[%s] 无法提取搜索关键词，URL=%s", source.get("name"), url)
+        return []
+
+    logger.info("B站搜索开始：[%s] keyword=%s", source.get("name"), keyword)
+
+    img_key, sub_key = _get_wbi_keys()
+    # order/length/tids 即使为默认值也需显式传递，否则 B站 API 可能返回空结果
+    params = _enc_wbi(
+        {"search_type": "video", "keyword": keyword, "page": 1, "page_size": 20,
+         "order": "", "length": 4, "tids": 0},
+        img_key, sub_key,
+    )
+    full_url = f"{BILI_SEARCH_API}?{urlencode(params)}"
+    sess = _get_bili_session()
+    _throttle_for_host(full_url)
+    resp = sess.get(full_url, timeout=TIMEOUT)
+    resp.raise_for_status()
+    body = resp.json()
+    if body.get("code") != 0:
+        logger.warning("[%s] B站搜索 API 返回错误：%s", source.get("name"), body.get("message"))
+        return []
+
+    data = body.get("data", {})
+    results = data.get("result") or []
+    if not results and "v_voucher" in data:
+        logger.warning("[%s] B站触发人机验证（v_voucher），可能因请求频率过高被风控", source.get("name"))
+    items: list[FetchItem] = []
+    for r in results:
+        # 清理 title 中的 <em> 高亮标签
+        title = re.sub(r"<[^>]+>", "", r.get("title") or "").strip() or r.get("title") or ""
+        bvid = r.get("bvid") or ""
+        arcurl = r.get("arcurl") or (f"https://www.bilibili.com/video/{bvid}" if bvid else "")
+        desc = (r.get("description") or "").strip()
+        pubdate = r.get("pubdate")
+        published_at = _normalize_datetime(pubdate) if pubdate else None
+        items.append(FetchItem(
+            title=title,
+            url=arcurl,
+            canonical_url=arcurl,
+            author=r.get("author"),
+            published_at=published_at,
+            source_item_id=bvid or arcurl,
+            raw_html=None,
+            content_text=desc,
+            language="zh",
+            fetch_error=None if desc else "视频无简介",
+        ))
+    logger.info("B站搜索 [%s] 完成：%d 条结果", source.get("name"), len(items))
     return items
 
 
@@ -425,11 +574,63 @@ def _lang_from_html(soup: BeautifulSoup) -> str | None:
     return html.get("lang") if html else None
 
 
+def _normalize_datetime(val) -> str | None:
+    """把各种日期格式归一化为 MySQL DATETIME 格式 YYYY-MM-DD HH:MM:SS。
+
+    MySQL DATETIME 不接受 ISO8601 的 T 分隔符和时区后缀，也不接受 RFC822 格式，
+    非严格 SQL mode 下无法解析的日期会被存成 0000-00-00 00:00:00。
+    支持：time.struct_time / datetime / ISO8601 / RFC822 / unix timestamp / 已合格格式。
+    """
+    if not val:
+        return None
+    # time.struct_time（feedparser 的 *_parsed 字段）
+    if isinstance(val, time.struct_time):
+        return time.strftime("%Y-%m-%d %H:%M:%S", val)
+    # datetime 对象
+    if isinstance(val, datetime):
+        return val.strftime("%Y-%m-%d %H:%M:%S")
+    s = str(val).strip()
+    if not s:
+        return None
+    # 已经是 MySQL DATETIME 格式
+    if re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", s):
+        return s
+    # 已经是 MySQL DATE 格式
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        return f"{s} 00:00:00"
+    # ISO8601（带 T 和时区，如 2024-01-01T00:00:00+00:00 或 ...Z）
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        pass
+    # RFC822（如 Mon, 01 Jan 2024 00:00:00 +0000）
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(s)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        pass
+    # unix timestamp（字符串或数字）
+    try:
+        return datetime.fromtimestamp(float(s), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        pass
+    logger.debug("无法解析的日期格式，已置空：%r", s)
+    return None
+
+
 def _parse_published(entry) -> str | None:
+    # 优先用 feedparser 解析好的 *_parsed（time.struct_time），格式最可靠；
+    # 回退到原始字符串字段，再由 _normalize_datetime 统一转 MySQL DATETIME。
+    for key in ("published_parsed", "updated_parsed", "created_parsed"):
+        val = entry.get(key)
+        if val:
+            return _normalize_datetime(val)
     for key in ("published", "updated", "created"):
         val = entry.get(key)
         if val:
             if isinstance(val, list):
-                return val[0]
-            return str(val)
+                val = val[0]
+            return _normalize_datetime(val)
     return None

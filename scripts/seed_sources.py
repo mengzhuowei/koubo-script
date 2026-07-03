@@ -348,11 +348,11 @@ SOURCES = [
     {
         "name": "B站 AI Agent 搜索",
         "url": "https://search.bilibili.com/all?keyword=AI%20Agent",
-        "type": "manual",
+        "type": "bilibili_search",
         "level": "C",
-        "enabled": 0,
+        "enabled": 1,
         "keywords": kw("B站,Bilibili,AI Agent,视频,竞品"),
-        "note": "产品设计平台竞品源：B站。同类账号/搜索结果需人工或专用采集，先停用。",
+        "note": "平台竞品源：B站。通过 wbi 签名调官方搜索 API 获取视频结果。",
     },
 ]
 
