@@ -97,7 +97,8 @@ def list_topics(*, status: str = "", category: str = "", date_from: str = "",
     if date_to:
         sql += " AND DATE(created_at) <= %s"
         params.append(date_to)
-    sql += " ORDER BY score DESC, id DESC LIMIT %s"
+    # 排序：当天创建的选题优先排前，再按分数倒序，最后按 id 倒序
+    sql += " ORDER BY CASE WHEN DATE(created_at) = CURDATE() THEN 0 ELSE 1 END, score DESC, id DESC LIMIT %s"
     params.append(limit)
     conn = get_conn()
     try:
