@@ -294,8 +294,9 @@ def _fetch_webpage_list(source: dict) -> list[FetchItem]:
     refetch_count = 0
     consecutive_fail = 0
     skip_refetch = False
+    _MAX_ARTICLES = 30  # 列表页可能含大量侧边栏推荐链接，限制最多抓取篇数避免耗时过长
     for abs_url, title_hint in article_links:
-        if skip_refetch:
+        if skip_refetch or len(items) >= _MAX_ARTICLES:
             break
         fetched = _fetch_article_page(abs_url)
         if fetched:
