@@ -23,6 +23,19 @@
       ｜ 语言：{{ article.language or '-' }}
     </div>
 
+    {% if linked_topics %}
+    <div style="margin-bottom:12px">
+      <div class="muted" style="margin-bottom:4px">关联选题（{{ linked_topics|length }}）：</div>
+      {% for t in linked_topics %}
+      <div style="margin-top:4px">
+        <a href="/topics/{{ t.id }}">#{{ t.id }} · {{ t.title }}</a>
+        <span class="score" style="margin-left:6px">{{ t.score }}</span>
+        <span class="tag tag-{{ t.status }}" style="margin-left:6px">{{ t.status }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     {% if article.summary %}
     <h3 style="margin-top:16px">摘要</h3>
     <pre class="body-text">{{ article.summary }}</pre>

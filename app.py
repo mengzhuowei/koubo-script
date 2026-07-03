@@ -162,7 +162,12 @@ def articles_bulk_ignore(request: Request, article_ids: list[int] = Form(default
 @app.get("/articles/{article_id}", response_class=HTMLResponse)
 def article_detail(request: Request, article_id: int):
     from repositories.articles_repo import get_article
-    return render(request, "article_detail.html", {"active": "articles", "article": get_article(article_id)})
+    from repositories.topics_repo import list_topics_for_article
+    return render(request, "article_detail.html", {
+        "active": "articles",
+        "article": get_article(article_id),
+        "linked_topics": list_topics_for_article(article_id),
+    })
 
 
 @app.post("/articles/{article_id}/ignore")

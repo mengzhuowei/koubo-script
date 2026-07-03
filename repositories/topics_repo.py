@@ -203,6 +203,21 @@ def list_topic_ids_for_article(article_id: int) -> list[int]:
         conn.close()
 
 
+def list_topics_for_article(article_id: int) -> list[dict]:
+    """返回与文章关联的选题列表（id/title/status/score），供文章详情页跳转。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT t.id, t.title, t.status, t.score FROM topic_articles ta "
+            "JOIN topics t ON ta.topic_id = t.id WHERE ta.article_id = %s "
+            "ORDER BY t.id DESC",
+            (article_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def unlink_article_from_topics(article_id: int) -> list[int]:
     """解除文章与所有 topic 的关联，返回被解除的 topic_id 列表。"""
     conn = get_conn()
