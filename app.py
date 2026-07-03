@@ -180,6 +180,14 @@ def article_edit(article_id: int, title: str = Form(...), content_text: str = Fo
     return RedirectResponse(url=f"/articles/{article_id}", status_code=303)
 
 
+@app.post("/articles/{article_id}/regenerate-topic")
+def article_regenerate_topic(article_id: int):
+    """针对单篇文章重新生成选题，覆盖旧选题。入队后跳到任务页跟踪进度。"""
+    from repositories.jobs_repo import enqueue
+    enqueue("regenerate_topic_for_article", {"article_id": article_id})
+    return RedirectResponse(url="/jobs", status_code=303)
+
+
 @app.post("/articles/{article_id}/add-to-topic")
 def article_add_to_topic(article_id: int, topic_id: int = Form(...)):
     from repositories.topics_repo import add_article_to_topic

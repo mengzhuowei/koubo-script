@@ -189,3 +189,55 @@ def list_recent_topic_titles(days: int = 7, limit: int = 500) -> list[dict]:
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+def list_topic_ids_for_article(article_id: int) -> list[int]:
+    """返回与文章关联的所有 topic_id。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT topic_id FROM topic_articles WHERE article_id = %s", (article_id,)
+        ).fetchall()
+        return [r["topic_id"] for r in rows]
+    finally:
+        conn.close()
+
+
+def unlink_article_from_topics(article_id: int) -> list[int]:
+    """解除文章与所有 topic 的关联，返回被解除的 topic_id 列表。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT topic_id FROM topic_articles WHERE article_id = %s", (article_id,)
+        ).fetchall()
+        topic_ids = [r["topic_id"] for r in rows]
+        if topic_ids:
+            conn.execute(
+                "DELETE FROM topic_articles WHERE article_id = %s", (article_id,)
+            )
+        return topic_ids
+    finally:
+        conn.close()
+
+
+def count_articles_for_topic(topic_id: int) -> int:
+    """统计选题仍关联的文章数（排除刚解除的那篇）。"""
+    conn = get_conn()
+    try:
+        r = conn.execute(
+            "SELECT COUNT(*) AS c FROM topic_articles WHERE topic_id = %s", (topic_id,)
+        ).fetchone()
+        return r["c"] if r else 0
+    finally:
+        conn.close()
+
+
+def delete_topic(topic_id: int) -> None:
+    """删除选题及其 facts 与 article 关联。仅用于无脚本且无其他文章关联的孤立旧选题。"""
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM topic_facts WHERE topic_id = %s", (topic_id,))
+        conn.execute("DELETE FROM topic_articles WHERE topic_id = %s", (topic_id,))
+        conn.execute("DELETE FROM topics WHERE id = %s", (topic_id,))
+    finally:
+        conn.close()

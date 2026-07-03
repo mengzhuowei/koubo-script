@@ -108,6 +108,18 @@ def list_scripts_for_topic(topic_id: int) -> list[dict]:
         conn.close()
 
 
+def count_scripts_for_topic(topic_id: int) -> int:
+    """统计选题下的脚本数，用于判断旧选题是否可安全删除。"""
+    conn = get_conn()
+    try:
+        r = conn.execute(
+            "SELECT COUNT(*) AS c FROM scripts WHERE topic_id = %s", (topic_id,)
+        ).fetchone()
+        return r["c"] if r else 0
+    finally:
+        conn.close()
+
+
 def list_recent_scripts(limit: int = 5) -> list[dict]:
     conn = get_conn()
     try:

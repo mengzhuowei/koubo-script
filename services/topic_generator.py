@@ -111,6 +111,67 @@ def generate_topics_from_unprocessed(limit: int = 20) -> int:
     return count
 
 
+def regenerate_topic_for_article(article_id: int) -> int:
+    """针对单篇文章重新生成选题，覆盖旧选题内容。返回新 topic_id。
+
+    流程：
+    1. 解除该文章与所有旧 topic 的 topic_articles 关联；
+    2. 删除其中无脚本、且无其他文章关联的孤立旧 topic（含 facts）；
+       有脚本的旧 topic 保留，避免误删用户已写的脚本；
+    3. 重置文章为 new 并清空旧摘要（让 summarizer 用新正文重新跑）；
+    4. 针对单篇文章重新生成内容卡并落库。
+
+    与批量 generate_topics_from_unprocessed 不同，本函数只处理这一篇，
+    便于人工补充正文后定点重生成，不影响其他待处理文章。
+    """
+    from repositories.articles_repo import get_article, reset_to_new, update_article_summary
+    from repositories.topics_repo import (
+        list_topic_ids_for_article, unlink_article_from_topics,
+        delete_topic, count_articles_for_topic,
+    )
+    from repositories.scripts_repo import count_scripts_for_topic
+
+    article = get_article(article_id)
+    if not article:
+        raise ValueError(f"article {article_id} 不存在")
+
+    # 1. 解除旧关联
+    old_topic_ids = list_topic_ids_for_article(article_id)
+    if old_topic_ids:
+        unlink_article_from_topics(article_id)
+        deleted = 0
+        kept = 0
+        for tid in old_topic_ids:
+            # 有脚本或仍有其他文章关联的旧 topic 保留
+            if count_scripts_for_topic(tid) > 0 or count_articles_for_topic(tid) > 0:
+                kept += 1
+            else:
+                delete_topic(tid)
+                deleted += 1
+        logger.info("文章 %s 旧选题：删除孤立 %d 个，保留 %d 个（有脚本或仍有其他文章关联）",
+                    article_id, deleted, kept)
+
+    # 2. 重置文章状态，清空旧摘要让 summarizer 用新正文重新跑
+    reset_to_new(article_id)
+    article = get_article(article_id)  # 取重置后的最新数据
+
+    # 3. 重新生成
+    template = _load_prompt()
+    profile = get_profile_context()
+    recent_titles: list[dict] = list_recent_topic_titles(days=DEDUP_WINDOW_DAYS)
+
+    if not article.get("summary"):
+        summary, key_points = summarize_article(article)
+        update_article_summary(article_id, summary=summary, key_points=key_points)
+        article["summary"] = summary
+        article["key_points"] = key_points
+
+    card = _generate_card(article, template, profile)
+    topic_id, is_new = _persist_card(article, card, recent_titles)
+    logger.info("文章 %s 重新生成选题 topic_id=%s (新建=%s)", article_id, topic_id, is_new)
+    return topic_id
+
+
 def _generate_card(article: dict, template: str, profile: str) -> dict:
     content = (article.get("summary") or article.get("content_text") or "")[:3000]
     prompt = render_prompt(

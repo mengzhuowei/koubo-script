@@ -65,6 +65,8 @@ def _dispatch(jtype: str, payload: dict, job_id: int) -> None:
         _handle_process_article(payload)
     elif jtype == "generate_topic":
         _handle_generate_topic(job_id)
+    elif jtype == "regenerate_topic_for_article":
+        _handle_regenerate_topic_for_article(payload)
     elif jtype == "generate_script":
         _handle_generate_script(payload)
     elif jtype == "generate_assets":
@@ -147,6 +149,14 @@ def _handle_generate_topic(job_id: int) -> None:
     from services.topic_generator import generate_topics_from_unprocessed
     n = generate_topics_from_unprocessed()
     logger.info("generated %s topics for job %s", n, job_id)
+
+
+def _handle_regenerate_topic_for_article(payload: dict) -> None:
+    """针对单篇文章重新生成选题（人工补正文后定点重生成）。"""
+    from services.topic_generator import regenerate_topic_for_article
+    article_id = payload["article_id"]
+    topic_id = regenerate_topic_for_article(article_id)
+    logger.info("regenerated topic_id=%s for article_id=%s", topic_id, article_id)
 
 
 # ---------- 脚本生成 ----------

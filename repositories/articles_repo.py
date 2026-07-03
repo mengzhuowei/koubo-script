@@ -220,3 +220,17 @@ def mark_processed(article_id: int) -> None:
         )
     finally:
         conn.close()
+
+
+def reset_to_new(article_id: int) -> None:
+    """重置文章为未处理状态，清空旧摘要让 summarizer 用新正文重新跑。
+    保留 content_text（人工补充的正文）与 status 流程不直接翻成 processed。
+    """
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE articles SET status='new', summary=NULL, key_points=NULL, processed_at=NULL WHERE id = %s",
+            (article_id,),
+        )
+    finally:
+        conn.close()

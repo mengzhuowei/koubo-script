@@ -55,6 +55,18 @@
     </details>
 
     <details style="margin-top:16px">
+      <summary class="link">重新生成选题</summary>
+      <form method="post" action="/articles/{{ article.id }}/regenerate-topic" style="margin-top:8px">
+        <div class="muted" style="margin-bottom:8px">
+          基于当前正文重新生成选题。将解除本文与旧选题的关联，删除其中无脚本的孤立旧选题；
+          已写过脚本的旧选题会保留。
+        </div>
+        <button class="btn btn-primary" type="submit"
+                onclick="return confirm('确认基于当前正文重新生成选题？无脚本的旧选题将被删除。')">重新生成选题</button>
+      </form>
+    </details>
+
+    <details style="margin-top:16px">
       <summary class="link">加入已有选题</summary>
       <form class="form-inline" method="post" action="/articles/{{ article.id }}/add-to-topic" style="margin-top:8px">
         <input type="number" name="topic_id" placeholder="选题 ID" required>
