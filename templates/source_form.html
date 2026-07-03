@@ -18,6 +18,9 @@
       {% set t = source.type if source else 'rss' %}
       <option value="rss" {% if t == 'rss' %}selected{% endif %}>rss（RSS 订阅）</option>
       <option value="webpage" {% if t == 'webpage' %}selected{% endif %}>webpage（普通网页）</option>
+      <option value="webpage_list" {% if t == 'webpage_list' %}selected{% endif %}>webpage_list（列表型网页）</option>
+      <option value="github_topics" {% if t == 'github_topics' %}selected{% endif %}>github_topics（GitHub Topics 项目列表）</option>
+      <option value="bilibili_search" {% if t == 'bilibili_search' %}selected{% endif %}>bilibili_search（B站搜索）</option>
       <option value="manual" {% if t == 'manual' %}selected{% endif %}>manual（手动录入）</option>
     </select>
   </div>

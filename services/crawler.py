@@ -132,6 +132,8 @@ def fetch_source(source: dict) -> list[FetchItem]:
         return _fetch_webpage_list(source)
     if stype == "spa_list":
         return _fetch_spa_list(source)
+    if stype == "github_topics":
+        return _fetch_github_topics(source)
     if stype == "bilibili_search":
         return _fetch_bilibili_search(source)
     if stype == "manual":
@@ -316,6 +318,104 @@ def _fetch_webpage_list(source: dict) -> list[FetchItem]:
     logger.info("列表网页 [%s] 抓取完成：%d 篇文章，其中 %d 篇成功提取正文",
                 source.get("name"), len(items), refetch_count)
     return items
+
+
+# ---------- GitHub Topics 抓取 ----------
+# GitHub Topics 页面（如 https://github.com/topics/ai-agents）以 <article> 卡片列出项目，
+# 每张卡片含仓库名（owner/repo）、描述、Stars、语言、标签。直接从列表页提取即可，
+# 无需回抓每个 repo 页面（topics 页已含核心信息，且回抓会触发 GitHub 反爬）。
+def _fetch_github_topics(source: dict) -> list[FetchItem]:
+    """抓取 GitHub Topics 列表页，提取每个项目卡片的名称、描述、Stars 等。"""
+    url = source["url"]
+    logger.info("GitHub Topics 抓取开始：[%s] %s", source.get("name"), url)
+
+    try:
+        resp = _http_get(url)
+        resp.raise_for_status()
+    except Exception as e:
+        logger.warning("GitHub Topics 列表页抓取失败 %s: %s", url, e)
+        return []
+
+    soup = BeautifulSoup(resp.text, "lxml")
+    articles = soup.find_all("article")
+    if not articles:
+        logger.warning("[%s] 未找到 <article> 项目卡片，页面结构可能已变更", source.get("name"))
+        return []
+
+    items: list[FetchItem] = []
+    for art in articles:
+        # 仓库名：h3 里有两个 a 标签，第一个是 owner，第二个是 repo
+        h3 = art.find("h3")
+        if not h3:
+            continue
+        repo_link = None
+        owner_name = ""
+        repo_name = ""
+        links = h3.find_all("a", href=True)
+        if len(links) >= 2:
+            owner_name = links[0].get_text(strip=True)
+            repo_link = links[1]
+            repo_name = repo_link.get_text(strip=True)
+        elif len(links) == 1:
+            repo_link = links[0]
+            repo_name = repo_link.get_text(strip=True)
+        if not repo_link:
+            continue
+
+        repo_path = repo_link["href"]  # 如 /affaan-m/ECC
+        repo_url = urljoin("https://github.com", repo_path)
+        title = f"{owner_name}/{repo_name}" if owner_name else repo_name or repo_url
+
+        # 项目描述
+        desc_p = art.find("p")
+        description = desc_p.get_text(" ", strip=True) if desc_p else ""
+
+        # Stars（a[href*="stargazers"]）
+        star_text = ""
+        star_link = art.find("a", href=re.compile(r"stargazers"))
+        if star_link:
+            star_text = star_link.get_text(strip=True)
+
+        # 编程语言
+        lang_text = ""
+        lang_el = art.select_one("[itemprop='programmingLanguage']")
+        if lang_el:
+            lang_text = lang_el.get_text(strip=True)
+
+        # Topic 标签
+        tag_links = art.find_all("a", href=re.compile(r"^/topics/"))
+        tags = [a.get_text(strip=True) for a in tag_links if a.get_text(strip=True)]
+
+        # 组合正文
+        parts = []
+        if description:
+            parts.append(description)
+        meta_bits = []
+        if lang_text:
+            meta_bits.append(f"语言：{lang_text}")
+        if star_text:
+            meta_bits.append(f"Stars：{star_text}")
+        if tags:
+            meta_bits.append(f"标签：{', '.join(tags[:8])}")
+        if meta_bits:
+            parts.append(" | ".join(meta_bits))
+        content_text = "\n".join(parts)
+
+        items.append(FetchItem(
+            title=title,
+            url=repo_url,
+            canonical_url=repo_url,
+            author=owner_name or None,
+            published_at=None,  # GitHub Topics 列表页无发布时间
+            source_item_id=repo_url,
+            raw_html=None,
+            content_text=content_text,
+            language=lang_text or None,
+        ))
+
+    logger.info("GitHub Topics [%s] 抓取完成：%d 个项目", source.get("name"), len(items))
+    return items
+
 
 
 # ---------- SPA 列表抓取（Playwright 渲染） ----------
