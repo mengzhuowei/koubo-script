@@ -634,7 +634,7 @@ def _extract_item_from_html(url: str, html: str, title_hint: str | None = None) 
     供 _fetch_article_page_with_error（HTTP 抓取）和 _fetch_spa_list（Playwright 渲染）
     复用，避免正文提取逻辑重复。
     """
-    title, content_text, canonical, lang = _extract_with_trafilatura(html, url)
+    title, content_text, canonical, lang, date = _extract_with_trafilatura(html, url)
     if not content_text:
         logger.debug("trafilatura 提取为空，退回 BeautifulSoup：%s", url)
         soup = BeautifulSoup(html, "lxml")
@@ -642,6 +642,8 @@ def _extract_item_from_html(url: str, html: str, title_hint: str | None = None) 
         content_text = _fallback_text(soup)
         canonical = canonical or _extract_canonical(url, html)
         lang = lang or _meta(soup, "language") or _lang_from_html(soup)
+        # BS4 兜底时也从 meta 标签补一次发布时间
+        date = date or _meta(soup, "article:published_time") or _meta(soup, "date")
 
     if not content_text:
         return None
@@ -650,7 +652,7 @@ def _extract_item_from_html(url: str, html: str, title_hint: str | None = None) 
         url=url,
         canonical_url=canonical,
         author=None,
-        published_at=None,
+        published_at=_normalize_datetime(date),
         source_item_id=canonical or url,
         raw_html=html,
         content_text=content_text,
@@ -658,8 +660,8 @@ def _extract_item_from_html(url: str, html: str, title_hint: str | None = None) 
     )
 
 
-def _extract_with_trafilatura(html: str, source_url: str) -> tuple[str | None, str, str | None, str | None]:
-    """用 trafilatura 提取正文、标题、canonical、语言。失败返回空串。"""
+def _extract_with_trafilatura(html: str, source_url: str) -> tuple[str | None, str, str | None, str | None, str | None]:
+    """用 trafilatura 提取正文、标题、canonical、语言、发布日期。失败返回空串。"""
     import trafilatura
     try:
         content_text = trafilatura.extract(
@@ -673,15 +675,17 @@ def _extract_with_trafilatura(html: str, source_url: str) -> tuple[str | None, s
     title: str | None = None
     canonical: str | None = None
     lang: str | None = None
+    date: str | None = None
     try:
         meta = trafilatura.extract_metadata(html, default_url=source_url)
         if meta:
             title = meta.title
             canonical = meta.url or source_url
             lang = meta.language
+            date = meta.date
     except Exception:
         pass
-    return title, content_text, canonical, lang
+    return title, content_text, canonical, lang, date
 
 
 def _extract_text(html: str) -> str:
