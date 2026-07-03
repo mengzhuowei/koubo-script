@@ -33,6 +33,7 @@ _MIN_SUMMARY_LEN = 200
 _REFETCH_SKIP_HOSTS = {
     "openai.com",  # 旧博客 /index/ 和新 /blog/ 均返回 403
     "qbitai.com",  # 量子位：RSS 摘要仅导语，回抓文章页必被 RemoteDisconnected 拒绝
+    "huggingface.co",  # HF：feed 无 summary，/blog/ 路径持续 429 限流，回抓必失败
 }
 
 # 429/5xx 重试配置：指数退避，避免被反爬限流直接放弃

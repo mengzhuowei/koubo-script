@@ -157,9 +157,9 @@ SOURCES = [
         "url": "https://huggingface.co/blog/feed.xml",
         "type": "rss",
         "level": "A",
-        "enabled": 1,
+        "enabled": 0,
         "keywords": kw("Hugging Face,agents,transformers,smolagents"),
-        "note": "产品设计框架源：Hugging Face。稳定 RSS。",
+        "note": "产品设计框架源：Hugging Face。feed 无 summary，文章页 /blog/ 路径持续 429 限流无法回抓，停用待代理方案。",
     },
     # B 研究源
     {
