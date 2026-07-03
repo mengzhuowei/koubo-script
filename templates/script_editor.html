@@ -24,11 +24,8 @@
     </div>
     <div class="form-row">
       <label>时长（秒）</label>
-      <select name="duration">
-        <option value="60">60</option>
-        <option value="90" selected>90</option>
-        <option value="180">180</option>
-      </select>
+      <input type="number" name="duration" value="90" min="10" max="600" step="10" required>
+      <span class="muted">常用：60 / 90 / 180 / 300（5分钟）；上限 600 秒</span>
     </div>
     <div class="muted">生成会作为后台任务执行，下方会显示进度，完成后自动刷新脚本列表。</div>
     <button class="btn btn-primary" type="submit">生成脚本</button>
