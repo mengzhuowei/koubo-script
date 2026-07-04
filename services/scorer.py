@@ -11,12 +11,15 @@ logger = logging.getLogger(__name__)
 
 PROMPT_PATH = BASE_DIR / "prompts" / "topic_score.md"
 _prompt_cache: str | None = None
+_prompt_mtime: float = 0
 
 
 def _load_prompt() -> str:
-    global _prompt_cache
-    if _prompt_cache is None:
+    global _prompt_cache, _prompt_mtime
+    mtime = PROMPT_PATH.stat().st_mtime
+    if _prompt_cache is None or mtime > _prompt_mtime:
         _prompt_cache = PROMPT_PATH.read_text(encoding="utf-8")
+        _prompt_mtime = mtime
     return _prompt_cache
 
 
