@@ -1,10 +1,18 @@
-"""后台 worker：轮询 jobs 表并执行。所有业务 handler 在此分发。"""
+"""后台 worker：轮询 jobs 表并执行。所有业务 handler 在此分发。
+
+并发模型：单线程取任务 + 线程池并发执行，避免一个慢任务阻塞整个队列。
+- 主循环（_loop）只负责 claim_job 和提交到线程池
+- 线程池最大并发 _MAX_WORKERS 个任务
+- 每个 handler 在独立线程中运行，共享状态不存在竞争
+- DB 连接（get_conn）每次新建，天然线程安全
+"""
 from __future__ import annotations
 
 import logging
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 
 from config import settings
 from repositories import jobs_repo
@@ -13,21 +21,28 @@ from repositories.sources_repo import get_source, list_enabled_sources, update_f
 logger = logging.getLogger(__name__)
 _worker_thread: threading.Thread | None = None
 _stop = threading.Event()
+_executor: ThreadPoolExecutor | None = None
+_MAX_WORKERS = 3  # 最大并发任务数，避免 DB 连接池/反爬压力过大
 
 
 def start_worker() -> None:
     """在后台守护线程中启动 worker loop。可重复调用，只启动一次。"""
-    global _worker_thread
+    global _worker_thread, _executor
     if _worker_thread and _worker_thread.is_alive():
         return
     _stop.clear()
-    _worker_thread = threading.Thread(target=_loop, name="job-worker", daemon=True)
+    _executor = ThreadPoolExecutor(max_workers=_MAX_WORKERS, thread_name_prefix="job-worker")
+    _worker_thread = threading.Thread(target=_loop, name="job-worker-main", daemon=True)
     _worker_thread.start()
-    logger.info("job worker started")
+    logger.info("job worker started (max_workers=%s)", _MAX_WORKERS)
 
 
 def stop_worker() -> None:
     _stop.set()
+    global _executor
+    if _executor:
+        _executor.shutdown(wait=False)
+        _executor = None
 
 
 def _loop() -> None:
@@ -37,7 +52,7 @@ def _loop() -> None:
             if not job:
                 time.sleep(settings.job_poll_interval_seconds)
                 continue
-            _run_job(job)
+            _executor.submit(_run_job, job)
         except Exception:
             logger.exception("worker loop error")
             time.sleep(settings.job_poll_interval_seconds)
