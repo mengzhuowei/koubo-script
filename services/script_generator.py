@@ -58,8 +58,8 @@ def generate_script_for_topic(*, topic_id: int, platform: str, fmt: str, duratio
         platform=platform,
         format=fmt,
         duration=duration,
-        word_count_min=duration * 4,
-        word_count_max=duration * 5,
+        word_count_min=duration * 5,
+        word_count_max=duration * 7,
     )
 
     data = chat_json([{"role": "user", "content": prompt}])
@@ -74,8 +74,8 @@ def generate_script_for_topic(*, topic_id: int, platform: str, fmt: str, duratio
     hook_text = data.get("hook") or ""
     cta_text = data.get("cta") or ""
     total_chars = len(body_text) + len(hook_text) + len(cta_text)
-    word_count_min = duration * 4
-    word_count_max = duration * 5
+    word_count_min = duration * 5
+    word_count_max = duration * 7
     if total_chars < word_count_min:
         logger.warning("脚本 body+hook+cta 共 %d 字，低于目标 %d～%d 字（duration=%ds），视频会偏短",
                        total_chars, word_count_min, word_count_max, duration)
