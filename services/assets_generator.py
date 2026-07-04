@@ -41,7 +41,7 @@ def generate_assets_for_script(script_id: int) -> int:
         body=script.get("body") or "",
     )
 
-    data = chat_json([{"role": "user", "content": prompt}])
+    data = chat_json([{"role": "user", "content": prompt}], temperature=0.9)
 
     def _as_list(v):
         if isinstance(v, str):

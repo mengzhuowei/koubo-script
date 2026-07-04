@@ -62,7 +62,7 @@ def generate_script_for_topic(*, topic_id: int, platform: str, fmt: str, duratio
         word_count_max=duration * 7,
     )
 
-    data = chat_json([{"role": "user", "content": prompt}])
+    data = chat_json([{"role": "user", "content": prompt}], temperature=0.9)
 
     version = next_version(topic_id, platform, fmt, duration)
     hashtags = data.get("hashtags") or []

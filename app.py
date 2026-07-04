@@ -270,6 +270,17 @@ def topic_archive(topic_id: int):
 @app.post("/topics/{topic_id}/refresh-research-card")
 def topic_refresh_research_card(topic_id: int):
     """手动刷新资料卡，生成新版本。入队后跳回选题页带 job 参数自动跟踪进度。"""
+    from repositories.research_cards_repo import has_active_research_job
+    if has_active_research_job(topic_id):
+        from starlette.responses import HTMLResponse
+        return HTMLResponse(
+            "<html><body style='font-family:sans-serif;margin:40px;text-align:center'>"
+            "<h2>已有生成中的资料卡</h2>"
+            "<p>该选题的资料卡正在生成或刷新中，请等待完成后刷新。</p>"
+            f"<a href='/topics/{topic_id}' style='color:#0066cc'>← 返回选题页</a>"
+            "</body></html>",
+            status_code=409,
+        )
     from repositories.jobs_repo import enqueue
     job_id = enqueue("refresh_research_card", {"topic_id": topic_id})
     return RedirectResponse(url=f"/topics/{topic_id}?job={job_id}", status_code=303)
@@ -348,8 +359,22 @@ def script_editor(request: Request, topic_id: int, job: int = 0):
 
 @app.post("/topics/{topic_id}/scripts")
 def script_generate(topic_id: int, platform: str = Form(...), format: str = Form(...), duration: int = Form(...)):
-    from repositories.jobs_repo import enqueue
+    from repositories.jobs_repo import enqueue, list_active_jobs_by_type
     from repositories.research_cards_repo import get_latest_card_for_topic, has_active_research_job
+    # 去重：同一选题已有进行中的生成任务则拒绝
+    active = list_active_jobs_by_type("generate_script")
+    for j in active:
+        p = j.get("payload") or {}
+        if p.get("topic_id") == topic_id:
+            from starlette.responses import HTMLResponse
+            return HTMLResponse(
+                "<html><body style='font-family:sans-serif;margin:40px;text-align:center'>"
+                "<h2>已有生成中的脚本</h2>"
+                "<p>该选题的脚本正在生成中，请等待完成后刷新。</p>"
+                f"<a href='/topics/{topic_id}/scripts' style='color:#0066cc'>← 返回脚本页</a>"
+                "</body></html>",
+                status_code=409,
+            )
     # 生成脚本前检查资料卡：无资料卡且无进行中任务时，先入队资料卡生成，跳回脚本页等待
     if not get_latest_card_for_topic(topic_id) and not has_active_research_job(topic_id):
         enqueue("generate_research_card", {"topic_id": topic_id})
@@ -374,8 +399,22 @@ def script_save(script_id: int, title: str = Form(""), hook: str = Form(""), bod
 @app.post("/scripts/{script_id}/assets")
 def script_generate_assets(script_id: int):
     """生成发布素材包（消耗 LLM，手动触发）。入队后跳回脚本编辑页并带 job 参数跟踪进度。"""
-    from repositories.jobs_repo import enqueue
+    from repositories.jobs_repo import enqueue, list_active_jobs_by_type
     from repositories.scripts_repo import get_script
+    # 去重：同一脚本已有进行中的素材包生成则拒绝
+    active = list_active_jobs_by_type("generate_assets")
+    for j in active:
+        p = j.get("payload") or {}
+        if p.get("script_id") == script_id:
+            from starlette.responses import HTMLResponse
+            return HTMLResponse(
+                "<html><body style='font-family:sans-serif;margin:40px;text-align:center'>"
+                "<h2>已有生成中的素材包</h2>"
+                "<p>该脚本的素材包正在生成中，请等待完成后刷新。</p>"
+                "<a href='javascript:history.back()' style='color:#0066cc'>← 返回</a>"
+                "</body></html>",
+                status_code=409,
+            )
     job_id = enqueue("generate_assets", {"script_id": script_id})
     existing = get_script(script_id)
     topic_id = existing.get("topic_id") if existing else None
