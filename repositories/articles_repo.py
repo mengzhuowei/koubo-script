@@ -72,11 +72,11 @@ def search_articles(*, q: str = "", source_id: int = 0, no_content: bool = False
         sql += " AND (a.content_text IS NULL OR a.content_text = '' OR a.content_text LIKE %s)"
         params.append("（正文获取失败%")
     if use_fulltext:
-        # 搜索时相关度优先，同分按抓取时间倒序（最新进池排前）
-        sql += " ORDER BY relevance DESC, a.fetched_at DESC"
+        # 搜索时相关度优先，同分按发布时间倒序，再按来源层级排序
+        sql += " ORDER BY relevance DESC, a.published_at DESC, FIELD(s.level, 'S', 'A', 'B', 'C')"
     else:
-        # 文章池默认按抓取时间倒序，最新抓进来的排最前
-        sql += " ORDER BY a.fetched_at DESC"
+        # 文章池按发布时间倒序（最新排前），同时间按来源层级排序
+        sql += " ORDER BY a.published_at DESC, FIELD(s.level, 'S', 'A', 'B', 'C')"
     sql += " LIMIT %s OFFSET %s"
     params += [limit, offset]
 
