@@ -80,51 +80,65 @@
     {% if scripts|length >= 2 %}<a class="link" href="/topics/{{ topic.id }}/scripts/compare" style="font-size:.9em">版本对比 →</a>{% endif %}
   </div>
   {% if scripts %}
-  {% for s in scripts %}
-  <details class="panel-body" {% if loop.first %}open{% endif %} style="border-top:1px solid var(--border)">
+{# 按 platform+format+duration 分组，每组只展开最新版本，历史版本折叠 #}
+{% set groups = {} %}
+{% for s in scripts %}
+  {% set key = s.platform ~ '|' ~ s.format ~ '|' ~ s.duration %}
+  {% if groups.update({key: (groups.get(key) or []) + [s]}) %}{% endif %}
+{% endfor %}
+{% for key, group in groups.items() %}
+  {% set group_count = group|length %}
+  {% set latest = group[0] %}  {# ORDER BY version DESC 所以第一个最新 #}
+  {% set is_latest = loop.first %}
+  <details class="panel-body" {% if is_latest %}open{% endif %} style="border-top:1px solid var(--border)">
     <summary>
-      <strong>v{{ s.version }}</strong> · {{ s.platform }} · {{ s.format }} · {{ s.duration }}s
-      <span class="muted">（{{ s.updated_at }}）</span>
+      <strong>{{ latest.platform }} · {{ latest.format }} · {{ latest.duration }}s</strong>
+      <span class="muted">
+        v{{ latest.version }}
+        {% if group_count > 1 %}（最新，共 {{ group_count }} 个版本）{% endif %}
+        · {{ latest.updated_at }}
+      </span>
     </summary>
-    <form class="form" method="post" action="/scripts/{{ s.id }}" style="margin-top:8px">
+    {# 最新版本表单（展开可见） #}
+    <form class="form" method="post" action="/scripts/{{ latest.id }}" style="margin-top:8px">
       <div class="form-row">
         <label>标题</label>
-        <input type="text" name="title" value="{{ s.title or '' }}">
+        <input type="text" name="title" value="{{ latest.title or '' }}">
       </div>
       <div class="form-row">
         <label>开头钩子</label>
-        <textarea name="hook" rows="2">{{ s.hook or '' }}</textarea>
+        <textarea name="hook" rows="2">{{ latest.hook or '' }}</textarea>
       </div>
       <div class="form-row">
         <label>正文</label>
-        <textarea name="body" rows="14" required>{{ s.body }}</textarea>
+        <textarea name="body" rows="14" required>{{ latest.body }}</textarea>
       </div>
       <div class="form-row">
         <label>CTA</label>
-        <textarea name="cta" rows="2">{{ s.cta or '' }}</textarea>
+        <textarea name="cta" rows="2">{{ latest.cta or '' }}</textarea>
       </div>
       <div class="form-row">
         <label>封面文案</label>
-        <input type="text" name="cover_text" value="{{ s.cover_text or '' }}">
+        <input type="text" name="cover_text" value="{{ latest.cover_text or '' }}">
       </div>
       <div class="form-row">
         <label>简介</label>
-        <textarea name="description" rows="2">{{ s.description or '' }}</textarea>
+        <textarea name="description" rows="2">{{ latest.description or '' }}</textarea>
       </div>
       <div class="form-row">
         <label>话题标签（逗号或换行分隔）</label>
-        <textarea name="hashtags" rows="2">{{ s.hashtags_list|join(',') }}</textarea>
+        <textarea name="hashtags" rows="2">{{ latest.hashtags_list|join(',') }}</textarea>
       </div>
       <button class="btn btn-primary" type="submit">保存修改</button>
     </form>
 
-    {% set assets = assets_map[s.id] %}
+    {% set assets = assets_map[latest.id] %}
     <div style="border-top:1px dashed var(--border); margin-top:12px; padding-top:12px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <strong>发布素材包</strong>
         <div style="display:flex;gap:8px">
-          <a class="btn btn-sm" href="/scripts/{{ s.id }}/fact-check">事实检查</a>
-          <form method="post" action="/scripts/{{ s.id }}/assets" style="margin:0">
+          <a class="btn btn-sm" href="/scripts/{{ latest.id }}/fact-check">事实检查</a>
+          <form method="post" action="/scripts/{{ latest.id }}/assets" style="margin:0">
             <button class="btn btn-primary" type="submit">生成素材包</button>
           </form>
         </div>
@@ -159,8 +173,23 @@
       <div class="muted">尚未生成，点击右侧按钮生成（消耗 LLM）。</div>
       {% endif %}
     </div>
+
+    {# 历史版本折叠 #}
+    {% if group_count > 1 %}
+    <details style="margin-top:16px;padding-top:8px;border-top:1px dashed var(--border)">
+      <summary class="muted" style="cursor:pointer">历史版本（{{ group_count - 1 }} 个）</summary>
+      {% for s in group[1:] %}
+      <div style="margin-top:8px;padding:6px 8px;background:#f8f9fa;border-radius:4px">
+        <div class="muted"><strong>v{{ s.version }}</strong> · {{ s.updated_at }}</div>
+        <div class="muted" style="font-size:.9em">标题：{{ s.title or '（无）' }}</div>
+        <div class="muted" style="font-size:.9em;max-height:3em;overflow:hidden">{{ s.body[:120] }}…</div>
+        <a class="link" href="/scripts/{{ s.id }}/restore?topic_id={{ topic.id }}">恢复为此版本</a>
+      </div>
+      {% endfor %}
+    </details>
+    {% endif %}
   </details>
-  {% endfor %}
+{% endfor %}
   {% else %}
   <div class="empty">暂无脚本，先在上方生成。</div>
   {% endif %}
@@ -236,16 +265,17 @@
         // 恢复生成按钮
         btn.disabled = false;
         btn.textContent = '生成脚本';
-        // 去掉 URL 中的 ?job=xxx，避免刷新后按钮仍被锁定
         if (params.get('job')) {
           history.replaceState(null, '', location.pathname);
         }
-        // 自动刷新脚本列表区，把新生成的脚本加载进来
-        fetch(location.pathname).then(function (r) { return r.text(); }).then(function (html) {
-          var doc = new DOMParser().parseFromString(html, 'text/html');
-          var fresh = doc.getElementById('scripts-section');
-          if (fresh) scriptsSection.innerHTML = fresh.innerHTML;
-        });
+        // 等 600ms 确保 DB 写入完成后再刷新页面，避免读到旧缓存
+        setTimeout(function () {
+          fetch(location.pathname).then(function (r) { return r.text(); }).then(function (html) {
+            var doc = new DOMParser().parseFromString(html, 'text/html');
+            var fresh = doc.getElementById('scripts-section');
+            if (fresh) scriptsSection.innerHTML = fresh.innerHTML;
+          });
+        }, 600);
         // 3 秒后收起进度提示
         setTimeout(function () { box.style.display = 'none'; }, 3000);
       } else if (st === 'failed' || st === 'not_found') {

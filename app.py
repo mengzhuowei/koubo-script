@@ -396,6 +396,34 @@ def script_save(script_id: int, title: str = Form(""), hook: str = Form(""), bod
     return RedirectResponse(url=target, status_code=303)
 
 
+@app.get("/scripts/{script_id}/restore")
+def script_restore(script_id: int, topic_id: int = 0):
+    """将历史版本的内容恢复到同参数组的最新版本。"""
+    from repositories.scripts_repo import get_script, list_scripts_for_topic, update_script
+    source = get_script(script_id)
+    if not source:
+        from starlette.responses import HTMLResponse
+        return HTMLResponse("脚本不存在", status_code=404)
+    # 找最新版本：同 topic 同 platform+format+duration
+    all_scripts = list_scripts_for_topic(source["topic_id"])
+    latest = None
+    for s in all_scripts:
+        if s["platform"] == source["platform"] and s["format"] == source["format"] and s["duration"] == source["duration"]:
+            if not latest or s["version"] > latest["version"]:
+                latest = s
+    if not latest or latest["id"] == script_id:
+        return RedirectResponse(url=f"/topics/{topic_id}/scripts", status_code=303)
+    update_script(latest["id"],
+                  title=source.get("title"),
+                  hook=source.get("hook"),
+                  body=source.get("body") or "",
+                  cta=source.get("cta"),
+                  cover_text=source.get("cover_text"),
+                  description=source.get("description"),
+                  hashtags="")
+    return RedirectResponse(url=f"/topics/{topic_id}/scripts", status_code=303)
+
+
 @app.post("/scripts/{script_id}/assets")
 def script_generate_assets(script_id: int):
     """生成发布素材包（消耗 LLM，手动触发）。入队后跳回脚本编辑页并带 job 参数跟踪进度。"""
