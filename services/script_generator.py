@@ -58,6 +58,8 @@ def generate_script_for_topic(*, topic_id: int, platform: str, fmt: str, duratio
         platform=platform,
         format=fmt,
         duration=duration,
+        word_count_min=duration * 4,
+        word_count_max=duration * 5,
     )
 
     data = chat_json([{"role": "user", "content": prompt}])
@@ -66,6 +68,20 @@ def generate_script_for_topic(*, topic_id: int, platform: str, fmt: str, duratio
     hashtags = data.get("hashtags") or []
     if isinstance(hashtags, str):
         hashtags = [hashtags]
+
+    # 生成后校验：body 字数是否在目标范围内
+    body_text = data.get("body") or ""
+    hook_text = data.get("hook") or ""
+    cta_text = data.get("cta") or ""
+    total_chars = len(body_text) + len(hook_text) + len(cta_text)
+    word_count_min = duration * 4
+    word_count_max = duration * 5
+    if total_chars < word_count_min:
+        logger.warning("脚本 body+hook+cta 共 %d 字，低于目标 %d～%d 字（duration=%ds），视频会偏短",
+                       total_chars, word_count_min, word_count_max, duration)
+    elif total_chars > word_count_max:
+        logger.warning("脚本 body+hook+cta 共 %d 字，超过目标 %d～%d 字（duration=%ds），视频会偏长",
+                       total_chars, word_count_min, word_count_max, duration)
 
     script_id = create_script(
         topic_id=topic_id,

@@ -26,7 +26,8 @@
 
 - 平台：{platform}
 - 模板：{format}（热点解读 / 工具教程 / 观点拆解）
-- 目标时长：{duration} 秒（按每秒 4-5 字估算正文字数）
+- 目标时长：{duration} 秒
+- 正文字数范围：{word_count_min}～{word_count_max} 字（含 hook、body、cta 合计），超出或不足都会导致视频时长不匹配
 
 ## 模板专属结构
 
