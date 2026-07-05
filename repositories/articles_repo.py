@@ -184,15 +184,41 @@ def count_articles_today() -> int:
 
 
 def list_unprocessed_articles(limit: int = 50) -> list[dict]:
+    """锁定并返回一批待处理的文章（原子性标记为 processing，避免并发重复）。
+
+    用 UPDATE ... LIMIT + SELECT 两步替代 SELECT FOR UPDATE SKIP LOCKED，
+    兼容 MySQL 5.7 和 8.0。
+    """
     conn = get_conn()
     try:
+        # 第一步：原子性锁定 limit 篇，只有此调用能看到这批文章
+        conn.execute(
+            "UPDATE articles SET status='processing' "
+            "WHERE status='new' ORDER BY published_at DESC LIMIT %s",
+            (limit,),
+        )
+        # 第二步：取回刚锁定的文章
         rows = conn.execute(
             "SELECT a.*, s.name AS source_name, s.level AS source_level "
             "FROM articles a LEFT JOIN sources s ON a.source_id = s.id "
-            "WHERE a.status = 'new' ORDER BY a.published_at DESC LIMIT %s",
+            "WHERE a.status = 'processing' ORDER BY a.published_at DESC LIMIT %s",
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def reset_stale_processing(delta_minutes: int = 10) -> int:
+    """将处理中超时的文章重置为 new（如 worker 崩溃导致 processing 僵尸）。"""
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "UPDATE articles SET status='new' WHERE status='processing' AND updated_at < NOW() - INTERVAL %s MINUTE",
+            (delta_minutes,),
+        )
+        conn.connection.commit()
+        return cur.rowcount
     finally:
         conn.close()
 
@@ -230,6 +256,18 @@ def reset_to_new(article_id: int) -> None:
     try:
         conn.execute(
             "UPDATE articles SET status='new', summary=NULL, key_points=NULL, processed_at=NULL WHERE id = %s",
+            (article_id,),
+        )
+    finally:
+        conn.close()
+
+
+def revert_to_new(article_id: int) -> None:
+    """把 processing 状态的文章还原为 new，供单篇失败后立即重试。"""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE articles SET status='new' WHERE id = %s AND status = 'processing'",
             (article_id,),
         )
     finally:

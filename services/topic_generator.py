@@ -75,6 +75,12 @@ def generate_topics_from_unprocessed(limit: int = 20) -> int:
     若有待处理文章但全部失败，抛出最后一个异常让 job 标记 failed，
     避免静默返回 0 误导用户。单篇失败仍允许 continue 以最大化产出。
     """
+    # 清理上次崩溃留下的傀儡 processing 文章（超时 > 10 分钟的先恢复为 new）
+    from repositories.articles_repo import reset_stale_processing
+    stale = reset_stale_processing()
+    if stale:
+        logger.info("清理了 %d 篇僵尸 processing 文章（恢复为 new）", stale)
+
     articles = list_unprocessed_articles(limit=limit)
     if not articles:
         logger.info("没有待生成选题的新文章")
@@ -110,6 +116,9 @@ def generate_topics_from_unprocessed(limit: int = 20) -> int:
             failures += 1
             last_error = e
             logger.warning("文章 %s 生成内容卡失败：%s", article["id"], e, exc_info=not isinstance(e, LLMError))
+            # 失败时恢复为 new，便于下次重试
+            from repositories.articles_repo import revert_to_new
+            revert_to_new(article["id"])
             continue
 
     if count == 0 and failures > 0 and last_error is not None:
