@@ -191,9 +191,10 @@ def list_unprocessed_articles(limit: int = 50) -> list[dict]:
     """
     conn = get_conn()
     try:
-        # 第一步：原子性锁定 limit 篇，只有此调用能看到这批文章
+        # 第一步：原子性锁定 limit 篇，只有此调用能看到这批文章。
+        # 同时记录 processed_at 作为"开始处理时间"，供 reset_stale_processing 判定超时。
         conn.execute(
-            "UPDATE articles SET status='processing' "
+            "UPDATE articles SET status='processing', processed_at=CURRENT_TIMESTAMP "
             "WHERE status='new' ORDER BY published_at DESC LIMIT %s",
             (limit,),
         )
@@ -210,14 +211,20 @@ def list_unprocessed_articles(limit: int = 50) -> list[dict]:
 
 
 def reset_stale_processing(delta_minutes: int = 10) -> int:
-    """将处理中超时的文章重置为 new（如 worker 崩溃导致 processing 僵尸）。"""
+    """将处理中超时的文章重置为 new（如 worker 崩溃导致 processing 僵尸）。
+
+    用 processed_at（list_unprocessed_articles 锁定时写入的"开始处理时间"）判定超时。
+    articles 表无 updated_at 列，且 processed_at 在 mark_processed 完成时会刷新为完成时间，
+    但此时 status 已变为 processed，不会被这里的 WHERE status='processing' 匹配，语义正确。
+    """
     conn = get_conn()
     try:
         cur = conn.execute(
-            "UPDATE articles SET status='new' WHERE status='processing' AND updated_at < NOW() - INTERVAL %s MINUTE",
+            "UPDATE articles SET status='new' "
+            "WHERE status='processing' "
+            "AND (processed_at IS NULL OR processed_at < NOW() - INTERVAL %s MINUTE)",
             (delta_minutes,),
         )
-        conn.connection.commit()
         return cur.rowcount
     finally:
         conn.close()
