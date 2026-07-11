@@ -375,9 +375,11 @@ def script_generate(topic_id: int, platform: str = Form(...), format: str = Form
                 "</body></html>",
                 status_code=409,
             )
-    # 生成脚本前检查资料卡：无资料卡且无进行中任务时，先入队资料卡生成，跳回脚本页等待
-    if not get_latest_card_for_topic(topic_id) and not has_active_research_job(topic_id):
-        enqueue("generate_research_card", {"topic_id": topic_id})
+    # 脚本必须等待资料卡完成。旧逻辑在资料卡任务已运行时会继续入队脚本，
+    # 并发 worker 可能让脚本先执行，意外退化成“无资料卡”版本。
+    if not get_latest_card_for_topic(topic_id):
+        if not has_active_research_job(topic_id):
+            enqueue("generate_research_card", {"topic_id": topic_id})
         return RedirectResponse(url=f"/topics/{topic_id}/scripts", status_code=303)
     job_id = enqueue("generate_script", {"topic_id": topic_id, "platform": platform, "format": format, "duration": duration})
     return RedirectResponse(url=f"/topics/{topic_id}/scripts?job={job_id}", status_code=303)

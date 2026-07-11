@@ -2,6 +2,8 @@
 
 版本：V0.1
 
+> **实现状态**：本文档为 V0.1 MVP 实施指南，MVP 闭环已按此指南完成。当前系统已迭代至 V0.3，新增能力（资料卡、联网搜索、事实校验、并发 worker 等）见 docs/technical-architecture.md。本文档保留作为 V0.1 开发历史参考。
+
 用途：给开发 Agent 读取的实施指南。目标是收窄开发自由度，让 Agent 能按固定顺序实现 MVP。
 
 ## 1. 必读顺序
@@ -63,6 +65,8 @@ http://127.0.0.1:8000
 
 ## 4. 推荐项目结构
 
+> V0.1 结构，当前已扩展（新增 research_cards_repo/web_search_repo/assets_repo、research_card_generator/fact_checker/credibility_scorer/web_search 等）。
+
 按以下结构创建文件。不要先引入复杂分层之外的新目录。
 
 ```text
@@ -117,6 +121,8 @@ http://127.0.0.1:8000
 ```
 
 ## 5. 开发顺序
+
+> MVP 已按此顺序完成。
 
 严格按以下顺序实现。每一步完成后运行应用做一次手动检查。
 
@@ -468,6 +474,8 @@ MVP UI 要求简单、密集、可操作。
 
 ## 9. 第一批种子来源
 
+> 当前种子源已扩展至 29 条，支持 7 种类型（rss/webpage/webpage_list/spa_list/github_topics/bilibili_search/manual），见 scripts/seed_sources.py。
+
 MVP 可先手动添加这些来源，优先 RSS 或普通网页：
 
 1. OpenAI Blog
@@ -484,6 +492,8 @@ MVP 可先手动添加这些来源，优先 RSS 或普通网页：
 如果某个来源难以自动抓取，允许先作为 manual 来源录入链接。
 
 ## 10. 验收 Checklist
+
+> MVP 验收已全部通过。
 
 交付前必须确认：
 
@@ -511,11 +521,11 @@ MVP 可先手动添加这些来源，优先 RSS 或普通网页：
 
 允许 TODO：
 
-1. MySQL FULLTEXT 全文搜索。
-2. GitHub/arXiv/HN 专用适配器。
-3. 定时任务。
-4. 发布素材包。
-5. 事实校验。
+1. MySQL FULLTEXT 全文搜索（已实现）。
+2. GitHub/arXiv/HN 专用适配器（部分实现：github_topics 类型）。
+3. 定时任务（已实现）。
+4. 发布素材包（已实现）。
+5. 事实校验（已实现）。
 6. 视频表现反馈。
 
 不要为了 TODO 改变现有架构。

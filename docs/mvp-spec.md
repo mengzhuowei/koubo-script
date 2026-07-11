@@ -2,6 +2,8 @@
 
 版本：V0.1
 
+> **实现状态**：本文档为 V0.1 MVP 规格，MVP 闭环已于 V0.1 阶段完成。后续能力扩展见 docs/technical-architecture.md 和 docs/product-design.md。
+
 目标：用最小可用版本跑通“抓取内容 -> 生成内容卡 -> 生成口播脚本 -> 保存版本”的核心闭环。
 
 ## 1. MVP 范围
@@ -25,10 +27,10 @@
 ### 暂不做
 
 1. 自动发布到抖音/小红书。
-2. 完整发布素材包。
+2. 完整发布素材包（V0.2 已实现）。
 3. 多用户登录和权限。
 4. 向量数据库。
-5. 多 worker 并发。
+5. 多 worker 并发（V0.3 已实现，ThreadPoolExecutor max_workers=3）。
 6. 平台竞品自动抓取。
 7. 复杂数据看板。
 
@@ -160,7 +162,11 @@ fetch_source
 fetch_all_sources
 process_article
 generate_topic
+regenerate_topic_for_article
+generate_research_card
+refresh_research_card
 generate_script
+generate_assets
 ```
 
 ### 任务状态
@@ -214,6 +220,8 @@ MVP 完成时，应该能做到：
 10. 重启应用后数据不丢失。
 
 ## 7. 推荐开发顺序
+
+> MVP 已按此顺序完成。
 
 1. 数据库初始化和 migration。
 2. FastAPI/Jinja2 页面骨架。
