@@ -7,10 +7,10 @@ import re
 from config import BASE_DIR
 from repositories.articles_repo import list_unprocessed_articles, mark_processed, update_article_summary
 from repositories.topics_repo import (
-    add_topic_fact, create_topic, link_article, list_recent_topic_titles, update_score,
+    add_topic_fact, create_topic, link_article, list_recent_topic_titles,
 )
 from services.llm import LLMError, chat_json, get_profile_context, render_prompt
-from services.scorer import score_topic
+from services.scorer import rescore_topic, score_topic
 from services.summarizer import summarize_article
 
 logger = logging.getLogger(__name__)
@@ -215,12 +215,28 @@ def _persist_card(article: dict, card: dict, recent_titles: list[dict]) -> tuple
     if dup_id:
         link_article(dup_id, article["id"])
         mark_processed(article["id"])
+        try:
+            from repositories.research_cards_repo import mark_needs_refresh
+            mark_needs_refresh(dup_id)
+            rescore_topic(dup_id, stage="provisional")
+        except Exception:
+            # 合并本身已经成功；评分失败不应让文章回滚并造成重复关联。
+            logger.warning("重复选题合并后重评分失败 topic_id=%s", dup_id, exc_info=True)
         return dup_id, False
 
     audience = card.get("audience") or []
     if isinstance(audience, str):
         audience = [audience]
-    score = score_topic(article, card)
+    score_result = score_topic(
+        article,
+        card,
+        stage="provisional",
+        sources=[{
+            "source_level": article.get("source_level"),
+            "published_at": article.get("published_at"),
+            "source_url": article.get("url"),
+        }],
+    )
 
     topic_id = create_topic(
         title=title,
@@ -231,10 +247,15 @@ def _persist_card(article: dict, card: dict, recent_titles: list[dict]) -> tuple
         recommended_column=card.get("recommended_column"),
         recommended_platform=card.get("recommended_platform"),
         recommended_duration=_int_or_none(card.get("recommended_duration")),
-        score=score,
+        score=score_result.score,
         source_level=article.get("source_level"),
         actionable_value=card.get("actionable_value") or "",
         risk_notes=card.get("risk_notes") or "",
+        score_breakdown=score_result.breakdown,
+        score_method=score_result.method,
+        score_version=score_result.version,
+        score_confidence=score_result.confidence,
+        score_stage=score_result.stage,
     )
 
     # 关键事实入库

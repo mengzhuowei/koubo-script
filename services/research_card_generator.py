@@ -142,6 +142,18 @@ def generate_research_card(topic_id: int) -> int:
 
     logger.info("生成资料卡 card_id=%s topic_id=%s 本地 %d 联网 %d confidence=%s",
                 card_id, topic_id, local_count, web_count, confidence)
+    try:
+        # 资料卡完成后，使用更完整的证据与来源把初评升级为终评。
+        from services.scorer import rescore_topic
+        rescore_topic(topic_id, research_card_id=card_id, stage="final")
+    except Exception:
+        # 资料卡已落库；评分异常不应让任务失败并重复生成资料卡。
+        logger.warning(
+            "资料卡完成后重评分失败 topic_id=%s card_id=%s",
+            topic_id,
+            card_id,
+            exc_info=True,
+        )
     return card_id
 
 

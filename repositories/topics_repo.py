@@ -8,25 +8,46 @@ from repositories.db import get_conn
 
 
 def _row(r):
-    return dict(r) if r else None
+    return _with_score_breakdown(dict(r)) if r else None
+
+
+def _with_score_breakdown(row: dict) -> dict:
+    raw = row.get("score_breakdown")
+    if isinstance(raw, dict):
+        row["score_breakdown_data"] = raw
+    elif raw:
+        try:
+            row["score_breakdown_data"] = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            row["score_breakdown_data"] = {}
+    else:
+        row["score_breakdown_data"] = {}
+    return row
 
 
 def create_topic(*, title: str, one_line_takeaway: str, summary: str, category: str | None,
                  audience: list[str], recommended_column: str | None, recommended_platform: str | None,
                  recommended_duration: int | None, score: int, source_level: str | None,
-                 actionable_value: str, risk_notes: str) -> int:
+                 actionable_value: str, risk_notes: str,
+                 score_breakdown: dict | None = None, score_method: str | None = None,
+                 score_version: str | None = None, score_confidence: str | None = None,
+                 score_stage: str | None = None) -> int:
     conn = get_conn()
     try:
         cur = conn.execute(
             """INSERT INTO topics
                (title, one_line_takeaway, summary, category, audience, recommended_column,
                 recommended_platform, recommended_duration, score, source_level,
-                actionable_value, risk_notes, status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'new')""",
+                actionable_value, risk_notes, score_breakdown, score_method, score_version,
+                score_confidence, score_stage, scored_at, status)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                       %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, 'new')""",
             (title, one_line_takeaway, summary, category,
              json.dumps(audience, ensure_ascii=False) if audience else None,
              recommended_column, recommended_platform, recommended_duration, score,
-             source_level, actionable_value, risk_notes),
+             source_level, actionable_value, risk_notes,
+             json.dumps(score_breakdown, ensure_ascii=False) if score_breakdown else None,
+             score_method, score_version, score_confidence, score_stage),
         )
         return cur.lastrowid
     finally:
@@ -59,12 +80,33 @@ def add_article_to_topic(topic_id: int, article_id: int) -> None:
     link_article(topic_id, article_id)
 
 
-def update_score(topic_id: int, score: int) -> None:
+def update_score(
+    topic_id: int,
+    score: int,
+    *,
+    breakdown: dict | None = None,
+    method: str | None = None,
+    version: str | None = None,
+    confidence: str | None = None,
+    stage: str | None = None,
+) -> None:
     conn = get_conn()
     try:
         conn.execute(
-            "UPDATE topics SET score = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
-            (int(score), topic_id),
+            """UPDATE topics
+               SET score = %s, score_breakdown = %s, score_method = %s,
+                   score_version = %s, score_confidence = %s, score_stage = %s,
+                   scored_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+               WHERE id = %s""",
+            (
+                int(score),
+                json.dumps(breakdown, ensure_ascii=False) if breakdown else None,
+                method,
+                version,
+                confidence,
+                stage,
+                topic_id,
+            ),
         )
     finally:
         conn.close()
@@ -102,7 +144,7 @@ def list_topics(*, status: str = "", category: str = "", date_from: str = "",
     params.append(limit)
     conn = get_conn()
     try:
-        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+        return [_with_score_breakdown(dict(r)) for r in conn.execute(sql, params).fetchall()]
     finally:
         conn.close()
 
@@ -113,7 +155,7 @@ def list_top_topics(limit: int = 10) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM topics ORDER BY score DESC, id DESC LIMIT %s", (limit,)
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_with_score_breakdown(dict(r)) for r in rows]
     finally:
         conn.close()
 
@@ -140,7 +182,9 @@ def get_topic_articles(topic_id: int) -> list[dict]:
     conn = get_conn()
     try:
         rows = conn.execute(
-            "SELECT a.* FROM topic_articles ta JOIN articles a ON ta.article_id = a.id "
+            "SELECT a.*, s.level AS source_level, s.name AS source_name "
+            "FROM topic_articles ta JOIN articles a ON ta.article_id = a.id "
+            "LEFT JOIN sources s ON s.id = a.source_id "
             "WHERE ta.topic_id = %s ORDER BY a.id ASC",
             (topic_id,),
         ).fetchall()

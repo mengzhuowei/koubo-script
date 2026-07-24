@@ -36,7 +36,17 @@
     <tbody>
     {% for t in topics %}
       <tr>
-        <td><span class="score">{{ t.score }}</span></td>
+        <td>
+          <span class="score">{{ t.score }}</span>
+          <div class="muted" style="margin-top:4px;font-size:12px">
+            {% if t.score_method == 'legacy' %}
+              旧版
+            {% else %}
+              {{ '终评' if t.score_stage == 'final' else '初评' }}
+              · {{ {'high':'高','medium':'中','low':'低'}.get(t.score_confidence, '未知') }}置信
+            {% endif %}
+          </div>
+        </td>
         <td><a href="/topics/{{ t.id }}">{{ t.title }}</a></td>
         <td>{{ t.recommended_column or t.category or '-' }}</td>
         <td>{{ t.recommended_platform or '-' }}</td>
