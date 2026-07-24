@@ -97,8 +97,9 @@
     <pre class="body-text">{{ research_card.summary or '（无摘要）' }}</pre>
 
     {% set rc = research_card.card or {} %}
-    {% if rc.efficiency_angle %}
-    <p style="margin-top:12px"><strong>效率角度：</strong>{{ rc.efficiency_angle }}</p>
+    {% set persona_angle = rc.persona_angle or rc.efficiency_angle %}
+    {% if persona_angle %}
+    <p style="margin-top:12px"><strong>人设角度：</strong>{{ persona_angle }}</p>
     {% endif %}
     {% if rc.workflow_example %}
     <p style="margin-top:12px"><strong>工作流案例：</strong>{{ rc.workflow_example }}</p>

@@ -384,6 +384,7 @@ def _topic_to_score_card(topic: dict, research_card: dict | None) -> dict:
         "key_facts": core_facts,
         "research_summary": research.get("research_summary") or "",
         "audience_value": research.get("audience_value") or "",
+        "persona_angle": research.get("persona_angle") or research.get("efficiency_angle") or "",
         "workflow_example": research.get("workflow_example") or "",
         "talking_points": research.get("talking_points") or [],
     }
@@ -443,6 +444,7 @@ def _format_research_context(card: dict) -> str:
     for key, label in (
         ("research_summary", "研究摘要"),
         ("audience_value", "观众价值"),
+        ("persona_angle", "人设角度"),
         ("workflow_example", "工作流"),
     ):
         if card.get(key):

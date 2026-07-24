@@ -27,12 +27,14 @@ class ScriptGeneratorHelpersTest(unittest.TestCase):
         }
         card = {"card": {
             "audience_value": "减少返工",
+            "persona_angle": "从试错成本控制角度讲",
             "workflow_example": "先预览再执行",
         }}
         context = _build_audience_context(topic, card)
         self.assertIn("核心观众：AI 工具新手", context)
         self.assertNotIn("独立开发者", context)
         self.assertIn("减少返工", context)
+        self.assertIn("从试错成本控制角度讲", context)
 
     def test_research_context_routes_fields_by_format(self):
         card = {"card": {

@@ -240,6 +240,9 @@ def _build_audience_context(topic: dict, card: dict | None) -> str:
     primary = str(audiences[0]).strip() if audiences else "从账号目标受众中选择与本题最相关的一类人"
     c = (card or {}).get("card") or {}
     parts = [f"- 核心观众：{primary}"]
+    persona_angle = c.get("persona_angle") or c.get("efficiency_angle")
+    if persona_angle:
+        parts.append(f"- 本账号讲这件事的角度：{persona_angle}")
     if c.get("audience_value"):
         parts.append(f"- 对他的具体价值：{c['audience_value']}")
     if topic.get("actionable_value"):
