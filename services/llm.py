@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any
 
@@ -17,7 +18,7 @@ class LLMError(Exception):
     """LLM 调用或解析错误。"""
 
 
-_client_cache: tuple[str, OpenAI] | None = None
+_client_cache: tuple[str, str, OpenAI] | None = None
 
 
 def _build_client() -> OpenAI:
@@ -28,10 +29,11 @@ def _build_client() -> OpenAI:
     api_key = get_api_key()
     if not api_key:
         raise LLMError("未配置 API Key，请在 .env 中设置环境变量后再调用 LLM。")
-    if _client_cache and _client_cache[0] == api_key:
-        return _client_cache[1]
-    client = OpenAI(api_key=api_key)
-    _client_cache = (api_key, client)
+    base_url = os.environ.get("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
+    if _client_cache and _client_cache[:2] == (api_key, base_url):
+        return _client_cache[2]
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    _client_cache = (api_key, base_url, client)
     return client
 
 

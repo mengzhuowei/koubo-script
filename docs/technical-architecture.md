@@ -1033,7 +1033,7 @@ LOG_LEVEL=INFO
 1. DEFAULT_LLM_PROVIDER 和 DEFAULT_LLM_MODEL 只用于首次初始化 llm_settings。应用运行后以页面保存的模型配置为准。
 2. Docker 运行时 compose 默认覆盖 DB_HOST=host.docker.internal，让 app 容器访问宿主机 MySQL。
 3. SCHEDULER_ENABLED 控制自动抓取调度；SCHEDULER_TOPIC_ENABLED 默认关闭，避免自动消耗 LLM。
-4. OPENAI_BASE_URL 当前作为预留配置存在；若要接入第三方 OpenAI 兼容网关，需要在 `services/llm.py` 中把 base_url 注入 OpenAI client。
+4. `OPENAI_BASE_URL` 会注入 `services/llm.py` 创建的 OpenAI client，可用于接入第三方 OpenAI 兼容接口；未配置或留空时默认使用 `https://api.openai.com/v1`。
 5. FETCH_USER_AGENT 建议使用浏览器 UA，避免被 SSR 站点（如 InfoQ）当作爬虫返回空壳 HTML。
 6. WEB_SEARCH_* / TAVILY_* 为 V0.3 联网搜索配置。WEB_SEARCH_ENABLED 默认关闭，关闭后只用本地文章库生成资料卡。TAVILY_API_KEY 需在 https://tavily.com 注册获取（免费档 1000 credits/月）。TAVILY_MONTHLY_CREDIT_BUDGET 默认 800（预留 200 安全余量），TAVILY_PER_TOPIC_CREDIT_BUDGET 默认 3（防止单选题烧太多额度）。
 
