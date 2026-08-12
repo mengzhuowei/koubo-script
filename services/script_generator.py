@@ -42,17 +42,21 @@ PLATFORM_INSTRUCTIONS = {
 
 FORMAT_INSTRUCTIONS = {
     "热点解读": (
-        "用聊天式新闻解读：先说变化对观众意味着什么，再用最少背景交代发生了什么，"
-        "最后给一个能立刻采取的动作。最多引用内容预算允许的事实；不要写成新闻播报。"
+        "用聊天式新闻解读：先亮出资料中最具体的变化或结果，再说它对观众意味着什么；"
+        "用最少背景解释背后的机制，接一个具体例子，最后补充成立条件、风险边界和一个能立刻采取的动作。"
+        "最多引用内容预算允许的事实；不要写成新闻播报。"
     ),
     "工具教程": (
-        "围绕一个具体问题教学：先点明新手最容易做错的动作，再给正确方法和操作步骤。"
+        "围绕一个具体问题教学：先用结果或具体场景点明新手最容易做错的动作，再做一次概念纠偏，"
+        "然后给正确方法和操作步骤。"
         "步骤必须包含动作、检查点和必要的避坑提醒；至少给一句用「」包裹的可复制话术。"
-        "注意讲清一个“X 不是 Y”的关键区分，结尾把技巧升级为可复用的方法。"
+        "注意讲清一个“X 不是 Y，而是 Z”的关键区分；长稿用一个案例讲清需求、动作和结果，"
+        "结尾补充迭代或交付护栏，再把技巧升级为可复用的方法。"
     ),
     "观点拆解": (
-        "像回应观众的争议问题：先给明确判断，再说最强支持理由和最强反对理由，"
-        "最后说明判断成立的条件与边界。用一个具体例子代替论据清单，不要写成辩论稿。"
+        "像回应观众的争议问题：先用具体事实或场景给明确判断，再纠正一个常见误解；"
+        "用一个完整例子解释最强支持理由，再回应最强反对理由，最后说明判断成立的条件、边界和行动建议。"
+        "不要写成辩论稿。"
     ),
 }
 
@@ -135,7 +139,7 @@ def generate_script_for_topic(*, topic_id: int, platform: str, fmt: str, duratio
     ])
     payload, schema_issue = _parse_payload(raw_data)
     quality_issues = [schema_issue] if schema_issue else _quality_issues(
-        payload, platform=platform, duration=duration,
+        payload, platform=platform, fmt=fmt, duration=duration,
         word_count_min=word_count_min, word_count_max=word_count_max,
     )
 
@@ -162,7 +166,7 @@ def generate_script_for_topic(*, topic_id: int, platform: str, fmt: str, duratio
         if schema_issue:
             raise LLMError(f"脚本回修后结构仍不合格：{schema_issue}")
         remaining = _quality_issues(
-            payload, platform=platform, duration=duration,
+            payload, platform=platform, fmt=fmt, duration=duration,
             word_count_min=word_count_min, word_count_max=word_count_max,
         )
         if remaining:
@@ -206,8 +210,8 @@ def _validate_options(*, platform: str, fmt: str, duration: int) -> None:
 
 
 def _word_count_range(duration: int) -> tuple[int, int]:
-    """聊天式口播初始预算：每秒 4～5 个可朗读字符，后续应以真实录音校准。"""
-    return duration * 4, duration * 5
+    """参考视频实测约 6.9 字/秒；留出停顿后按 5.5～6.5 个可朗读字符预算。"""
+    return round(duration * 5.5), round(duration * 6.5)
 
 
 def _build_duration_instructions(duration: int, fmt: str) -> str:
@@ -322,7 +326,7 @@ def _spoken_char_count(text: str) -> int:
 
 
 def _quality_issues(
-    payload: ScriptPayload | None, *, platform: str, duration: int,
+    payload: ScriptPayload | None, *, platform: str, fmt: str, duration: int,
     word_count_min: int, word_count_max: int,
 ) -> list[str]:
     if payload is None:
@@ -356,6 +360,17 @@ def _quality_issues(
         issues.append(f"有 {len(long_sentences)} 个超过 45 个可朗读字符的长句")
     if duration <= 90 and combined.count("？") + combined.count("?") > 3:
         issues.append("问句过多，像连续审问观众")
+    if duration >= 60 and not any(cue in combined for cue in ("比如", "举个例子", "举例", "假设", "你可以")):
+        issues.append("缺少具体例子或可执行场景，抽象解释没有及时落地")
+    if duration >= 90 and not any(cue in combined for cue in ("但是", "不过", "注意", "前提", "风险", "边界")):
+        issues.append("长稿缺少风险、前提或边界，容易只讲机会和结论")
+    if fmt == "工具教程" and duration >= 45:
+        if "不是" not in combined or not any(cue in combined for cue in ("而是", "真正", "严格来说")):
+            issues.append("工具教程缺少“X 不是 Y，而是 Z”的概念纠偏")
+        if "第一步" not in combined or not any(cue in combined for cue in ("第二步", "然后", "接着")):
+            issues.append("工具教程缺少可跟做的分步推进")
+        if "「" not in combined or "」" not in combined:
+            issues.append("工具教程缺少用「」标出的可复制话术")
     if _spoken_char_count(payload.cta) > 35:
         issues.append("CTA 过长，应收成承接本条内容的一句话")
     return issues

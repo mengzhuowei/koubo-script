@@ -18,7 +18,7 @@ class ScriptGeneratorHelpersTest(unittest.TestCase):
         self.assertEqual(_spoken_char_count("你好，AI Agent！\nGPT-4"), 13)
 
     def test_word_count_range_uses_chatty_pacing(self):
-        self.assertEqual(_word_count_range(60), (240, 300))
+        self.assertEqual(_word_count_range(60), (330, 390))
 
     def test_audience_context_locks_first_topic_audience(self):
         topic = {
@@ -76,13 +76,31 @@ class ScriptGeneratorHelpersTest(unittest.TestCase):
             cta="关注我",
         )
         issues = _quality_issues(
-            payload, platform="douyin", duration=10,
+            payload, platform="douyin", fmt="观点拆解", duration=10,
             word_count_min=1, word_count_max=100,
         )
         joined = "；".join(issues)
         self.assertIn("套话", joined)
         self.assertIn("结构标签", joined)
         self.assertIn("使用“你”", joined)
+
+    def test_quality_check_enforces_reference_tutorial_spine(self):
+        payload = ScriptPayload(
+            title="测试",
+            hook="你做自动化时，最容易犯的错是直接让工具交付成品。",
+            body=(
+                "第一步，先说清结果。第二步，再检查输出。"
+                "比如你可以说：请先给预览。"
+            ),
+            cta="关注我，继续拆工作流。",
+        )
+        issues = _quality_issues(
+            payload, platform="douyin", fmt="工具教程", duration=60,
+            word_count_min=1, word_count_max=500,
+        )
+        joined = "；".join(issues)
+        self.assertIn("概念纠偏", joined)
+        self.assertIn("可复制话术", joined)
 
     def test_generation_options_are_validated(self):
         _validate_options(platform="douyin", fmt="工具教程", duration=90)
