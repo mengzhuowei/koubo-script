@@ -104,3 +104,37 @@ class ProjectChatTest(unittest.TestCase):
         self.assertEqual(result["receipts"], [{"label": "资料卡任务 #12 已入队", "url": "/topics/7/scripts"}])
         self.assertEqual(finished["receipt"], result["receipts"][0])
         self.assertEqual(self.requests[0]["messages"][1]["content"], "这里是选题 #7")
+
+    def test_uploaded_file_reaches_model_only_through_attachment_tool(self):
+        client = TestClient(app)
+        attachment = client.post("/assistant/attachments", headers={
+            "Content-Type": "application/octet-stream", "X-Attachment-Name": "notes.txt",
+        }, content="交付日期为周五".encode())
+        self.assertEqual(attachment.status_code, 201)
+        key = attachment.json()["id"]
+        self.responses.extend([
+            (200, "text/event-stream", completion({"tool_calls": [{
+                "id": "call_file", "index": 0, "type": "function",
+                "function": {"name": "read_attachment", "arguments": '{"file":"file1"}'},
+            }]}, "tool_calls")),
+            (200, "text/event-stream", completion({"content": "附件写明周五交付。"}, "stop")),
+        ])
+        response = client.post("/assistant/chat", json={
+            "message": "读一下附件", "attachment_ids": [key], "new_attachment_ids": [key],
+        }, headers={"Accept": "application/x-ndjson"})
+        started, finished, reply = [json.loads(line) for line in response.iter_lines()]
+        self.assertEqual(started["label"], "读取附件")
+        self.assertEqual(finished["detail"], "文本读取 · 第 1 / 1 段")
+        self.assertTrue(reply["result"]["ok"])
+        self.assertNotIn(key, json.dumps(self.requests[0]))
+        self.assertNotIn("交付日期为周五", json.dumps(self.requests[0], ensure_ascii=False))
+        self.assertEqual(json.loads(self.requests[1]["messages"][-1]["content"])["text"], "交付日期为周五")
+
+    def test_unknown_attachment_is_reported_without_contacting_model(self):
+        key = "0" * 32
+        result = TestClient(app).post("/assistant/chat", json={
+            "message": "读一下附件", "attachment_ids": [key],
+        }).json()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["expired_attachment_ids"], [key])
+        self.assertEqual(self.requests, [])

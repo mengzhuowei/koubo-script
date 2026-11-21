@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from config import BASE_DIR, settings
 from repositories.settings_repo import get_api_key, get_llm_settings, get_openai_base_url
+from services.project_attachments import MAX_ATTACHMENTS, Attachment, resolve_attachments
 from services.project_tools import ToolError, execute_tool, tool_specs
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,8 @@ _tool_labels = {
     "start_job": "提交后台任务",
     "generate_script": "提交脚本生成请求",
     "retry_job": "重试后台任务",
+    "read_attachment": "读取附件",
+    "search_attachment": "检索附件",
 }
 _errors = {
     "runtime_error": "项目助手未能启动，请检查 Node.js 和 Pi 依赖。",
@@ -45,9 +48,15 @@ class ChatMessage(BaseModel):
     content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5000)]
 
 
+AttachmentIDs = Annotated[list[Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]],
+                          Field(max_length=MAX_ATTACHMENTS)]
+
+
 class ChatRequest(BaseModel):
     message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
     history: list[ChatMessage] = Field(default_factory=list, max_length=12)
+    attachment_ids: AttachmentIDs = Field(default_factory=list)
+    new_attachment_ids: AttachmentIDs = Field(default_factory=list)
 
 
 def _send(pipe, event: dict) -> None:
@@ -59,7 +68,7 @@ def _reply_event(reply: str, *, ok: bool = False, receipts: list | None = None) 
     return {"type": "reply", "result": {"reply": reply, "ok": ok, "receipts": receipts or []}}
 
 
-def _run_chat_events(payload: dict) -> Generator[dict, None, None]:
+def _run_chat_events(payload: dict, attachments: dict[str, Attachment] | None = None) -> Generator[dict, None, None]:
     receipts = []
     reply = ""
     error = "runtime_error"
@@ -104,7 +113,7 @@ def _run_chat_events(payload: dict) -> Generator[dict, None, None]:
                     try:
                         value = previous_actions.get(action_key)
                         if value is None:
-                            value = execute_tool(name, args)
+                            value = execute_tool(name, args, attachments=attachments)
                             if isinstance(value, dict) and "url" in value:
                                 previous_actions[action_key] = value
                                 receipt = {"label": value["label"], "url": value["url"]}
@@ -122,6 +131,8 @@ def _run_chat_events(payload: dict) -> Generator[dict, None, None]:
                         detail = "已返回结果"
                         if isinstance(value, list):
                             detail = f"返回 {len(value)} 条记录"
+                        elif name == "read_attachment":
+                            detail = f"{value['plugin']} · 第 {value['part']} / {value['parts']} 段"
                         elif isinstance(value, dict) and value.get("label"):
                             detail = value["label"]
                         finished = {**step, "state": "done", "detail": detail}
@@ -158,14 +169,22 @@ def _chat_events(request: ChatRequest) -> Generator[dict, None, None]:
         yield _reply_event("项目助手正在处理其他请求，请稍后再试。")
         return
     try:
+        attachments, missing = resolve_attachments(request.attachment_ids)
+        if missing:
+            event = _reply_event("有附件已过期，请重新上传后再发送。")
+            event["result"]["expired_attachment_ids"] = missing
+            yield event
+            return
         api_key = get_api_key()
         if not api_key:
             yield _reply_event("请在 .env 配置模型 API Key 后重启工作台。")
             return
         model = get_llm_settings()
         yield from _run_chat_events({
-            **request.model_dump(),
-            "tools": tool_specs(),
+            **request.model_dump(exclude={"attachment_ids", "new_attachment_ids"}),
+            "tools": tool_specs(bool(attachments)),
+            "attachments": [{"file": ref, "new": item.id in request.new_attachment_ids, **item.metadata()}
+                            for ref, item in attachments.items()],
             "today": date.today().isoformat(),
             "settings": {
                 "api_key": api_key,
@@ -174,7 +193,7 @@ def _chat_events(request: ChatRequest) -> Generator[dict, None, None]:
                 "temperature": float(model.get("temperature", 0.4)),
                 "max_tokens": max(1, min(int(model.get("max_tokens", 2000)), 4000)),
             },
-        })
+        }, attachments)
     finally:
         _slots.release()
 

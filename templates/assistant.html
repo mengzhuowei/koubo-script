@@ -21,13 +21,20 @@
     </div>
     <form class="project-chat-form" id="assistant-form">
       <label for="assistant-input">消息</label>
+      <ul class="project-chat-attachments" id="assistant-attachments" aria-label="待发送附件" hidden></ul>
       <div class="project-chat-composer">
-        <textarea id="assistant-input" rows="2" maxlength="2000" required placeholder="例如：把 12 号选题标为选用"></textarea>
+        <button type="button" class="btn project-chat-attach" id="assistant-attach" aria-label="上传文件" title="上传文件">＋</button>
+        <input type="file" id="assistant-files" accept="{{ attachment_types }}" multiple hidden
+               data-max-bytes="{{ max_attachment_bytes }}" data-max-files="{{ max_attachments }}">
+        <textarea id="assistant-input" rows="2" maxlength="2000" placeholder="输入消息" aria-describedby="assistant-suggestion"></textarea>
         <button class="btn btn-primary" id="assistant-send" type="submit">发送</button>
       </div>
+      <button type="button" class="project-chat-suggestion" id="assistant-suggestion" hidden>
+        <span id="assistant-suggestion-text"></span><kbd>Tab</kbd>
+      </button>
       <p class="project-chat-status" id="assistant-status" role="status" hidden></p>
     </form>
   </div>
 </section>
-<script src="/static/assistant.js?v=2" defer></script>
+<script src="/static/assistant.js?v=3" defer></script>
 {% endblock %}

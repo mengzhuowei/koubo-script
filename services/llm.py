@@ -36,14 +36,17 @@ def _build_client() -> OpenAI:
     return client
 
 
-def chat(messages: list[dict], *, json_mode: bool = False, temperature: float | None = None) -> str:
+def chat(messages: list[dict], *, json_mode: bool = False, temperature: float | None = None,
+         timeout: float | None = None, token_limit: int = 32768) -> str:
     """调用一次 chat completion，返回文本内容。
 
     参数 temperature 可覆盖 DB 设置，用于脚本生成等需要创造性差异的场景。
     """
     llm = get_llm_settings()
     client = _build_client()
-    max_tokens = max(1, min(int(llm["max_tokens"]), 32768))
+    if timeout is not None:
+        client = client.with_options(timeout=timeout, max_retries=0)
+    max_tokens = max(1, min(int(llm["max_tokens"]), token_limit))
     kwargs: dict[str, Any] = {
         "model": llm["model"],
         "temperature": float(llm["temperature"]) if temperature is None else temperature,
@@ -59,9 +62,10 @@ def chat(messages: list[dict], *, json_mode: bool = False, temperature: float | 
     return resp.choices[0].message.content or ""
 
 
-def chat_json(messages: list[dict], *, temperature: float | None = None) -> dict:
+def chat_json(messages: list[dict], *, temperature: float | None = None,
+              timeout: float | None = None, token_limit: int = 32768) -> dict:
     """调用 LLM 并解析为 JSON。"""
-    text = chat(messages, json_mode=True, temperature=temperature)
+    text = chat(messages, json_mode=True, temperature=temperature, timeout=timeout, token_limit=token_limit)
     return parse_json(text)
 
 

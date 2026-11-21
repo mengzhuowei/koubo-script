@@ -2,18 +2,22 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from urllib.parse import unquote
 
 import uvicorn
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
 from config import BASE_DIR, settings
 from repositories.db import init_db
 from repositories.jobs_repo import recover_stale_jobs
 from repositories.settings_repo import ensure_defaults
+from services.project_attachments import MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, READERS, AttachmentError, store_attachment
 from services.project_chat import CHAT_STREAM_TYPE, ChatRequest, chat as project_chat, stream_chat
+from services.project_suggestions import SuggestionRequest, suggestions
 from workers.job_runner import start_worker
 from workers.scheduler import start_scheduler, stop_scheduler
 
@@ -70,7 +74,34 @@ def dashboard(request: Request):
 
 @app.get("/assistant", response_class=HTMLResponse)
 def assistant_page(request: Request):
-    return render(request, "assistant.html", {"active": "assistant"})
+    return render(request, "assistant.html", {
+        "active": "assistant", "attachment_types": ",".join(READERS),
+        "max_attachment_bytes": MAX_UPLOAD_BYTES, "max_attachments": MAX_ATTACHMENTS,
+    })
+
+
+@app.post("/assistant/suggestions")
+def assistant_suggestions(payload: SuggestionRequest):
+    return suggestions(payload)
+
+
+@app.post("/assistant/attachments", status_code=201)
+async def assistant_attachment(request: Request):
+    if request.headers.get("content-type") != "application/octet-stream":
+        raise HTTPException(status_code=415, detail="请直接上传文件内容。")
+    name = request.headers.get("x-attachment-name", "")
+    if not name or len(name) > 2048:
+        raise HTTPException(status_code=422, detail="附件缺少有效的文件名。")
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="每个附件最多 5 MB。")
+        raw.extend(chunk)
+    try:
+        attachment = await run_in_threadpool(store_attachment, unquote(name), bytes(raw))
+    except AttachmentError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    return {"id": attachment.id, **attachment.metadata()}
 
 
 @app.post("/assistant/chat")

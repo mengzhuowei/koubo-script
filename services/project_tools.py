@@ -7,6 +7,7 @@ from typing import Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, ValidationError
 
 from repositories import articles_repo, jobs_repo, research_cards_repo, scripts_repo, sources_repo, topics_repo
+from services.project_attachments import Attachment, AttachmentError
 from services.script_jobs import request_script
 
 
@@ -63,6 +64,18 @@ class ScriptRequest(TopicID):
     platform: Literal["douyin", "xiaohongshu"] = "douyin"
     format: Literal["热点解读", "工具教程", "观点拆解"] = "热点解读"
     duration: int = Field(default=90, ge=10, le=600, description="脚本秒数")
+
+
+class AttachmentRef(Params):
+    file: str = Field(pattern=r"^file[1-6]$", description="当前对话可用附件的 file 编号")
+
+
+class AttachmentPart(AttachmentRef):
+    part: PositiveInt = Field(default=1, description="从 1 开始的段号")
+
+
+class AttachmentSearch(AttachmentRef):
+    keyword: str = Field(min_length=1, max_length=100)
 
 
 def _columns(row: dict, *fields: str) -> dict:
@@ -196,18 +209,38 @@ TOOLS: dict[str, tuple[str, type[Params], Callable]] = {
 }
 
 
-def tool_specs() -> list[dict]:
+_attachment_tools = {
+    "read_attachment": ("读取当前对话的附件指定段和对应的文档或表格处理指南。", AttachmentPart),
+    "search_attachment": ("在当前对话的附件中按关键词查找原文片段和所在段号。", AttachmentSearch),
+}
+
+
+def tool_specs(with_attachments: bool = False) -> list[dict]:
+    definitions = {name: (description, params) for name, (description, params, _) in TOOLS.items()}
+    if with_attachments:
+        definitions.update(_attachment_tools)
     return [{"name": name, "description": description, "parameters": params.model_json_schema()}
-            for name, (description, params, _) in TOOLS.items()]
+            for name, (description, params) in definitions.items()]
 
 
-def execute_tool(name: str, args: dict):
-    if name not in TOOLS:
+def execute_tool(name: str, args: dict, *, attachments: dict[str, Attachment] | None = None):
+    if name not in TOOLS and name not in _attachment_tools:
         raise ToolError("该工具不可用。")
-    _, params, handler = TOOLS[name]
+    params = (TOOLS.get(name) or _attachment_tools[name])[1]
     try:
         validated = params.model_validate(args)
     except ValidationError as exc:
         fields = "、".join(str(error["loc"][0]) for error in exc.errors() if error["loc"])
         raise ToolError(f"工具参数不合法。请检查 {fields or '输入'}。") from exc
-    return handler(validated)
+    if name in TOOLS:
+        return TOOLS[name][2](validated)
+
+    attachment = (attachments or {}).get(validated.file)
+    if not attachment:
+        raise ToolError("当前对话中没有这个附件。")
+    try:
+        if name == "read_attachment":
+            return attachment.read(validated.part)
+        return attachment.search(validated.keyword)
+    except AttachmentError as exc:
+        raise ToolError(str(exc)) from exc
