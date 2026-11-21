@@ -1,4 +1,9 @@
 # 口播雷达 MVP Docker 镜像
+FROM node:24-bookworm-slim AS pi-deps
+WORKDIR /pi-agent
+COPY pi-agent/package.json pi-agent/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+
 FROM python:3.11-slim
 
 # lxml/trafilatura 运行时需要的共享库（wheel 已 bundle，装上作保险）
@@ -31,6 +36,9 @@ COPY workers/ ./workers/
 COPY prompts/ ./prompts/
 COPY templates/ ./templates/
 COPY static/ ./static/
+COPY --from=pi-deps /usr/local/bin/node /usr/local/bin/node
+COPY --from=pi-deps /pi-agent/node_modules ./pi-agent/node_modules/
+COPY pi-agent/chat.mjs ./pi-agent/
 
 # 数据库存放目录（用卷挂载持久化）
 RUN mkdir -p data

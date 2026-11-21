@@ -152,26 +152,29 @@ def recover_stale_jobs() -> int:
         conn.close()
 
 
-def retry_job(job_id: int) -> None:
+def retry_job(job_id: int, *, failed_only: bool = False) -> bool:
     conn = get_conn()
     try:
-        conn.execute(
-            """UPDATE jobs
+        sql = """UPDATE jobs
                SET status = 'pending', attempts = 0, error = NULL, locked_by = NULL,
                    available_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-               WHERE id = %s""",
-            (job_id,),
-        )
+               WHERE id = %s"""
+        if failed_only:
+            sql += " AND status = 'failed'"
+        return conn.execute(sql, (job_id,)).rowcount > 0
     finally:
         conn.close()
 
 
-def list_jobs(limit: int = 100) -> list[dict]:
+def list_jobs(limit: int = 100, *, status: str = "") -> list[dict]:
     conn = get_conn()
     try:
-        rows = conn.execute(
-            "SELECT * FROM jobs ORDER BY id DESC LIMIT %s", (limit,)
-        ).fetchall()
+        sql = "SELECT * FROM jobs"
+        params = (limit,)
+        if status:
+            sql += " WHERE status = %s"
+            params = (status, limit)
+        rows = conn.execute(sql + " ORDER BY id DESC LIMIT %s", params).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()

@@ -28,6 +28,7 @@
 | 定时任务 | APScheduler（抓取调度默认开启，选题调度默认关闭） |
 | 抓取 | requests、feedparser、BeautifulSoup、lxml（trafilatura 作为依赖预留） |
 | LLM 调用 | OpenAI API 或可替换 provider |
+| 项目助手 | Pi Agent Core + OpenAI 兼容模型工具调用 |
 | 联网搜索 | Tavily API（可选，本地资料不足时联网补充） |
 | 配置 | .env + pydantic-settings |
 | 容器化 | Docker + docker-compose（app + mysql 双容器编排） |
@@ -64,6 +65,14 @@ Repositories
   v
 MySQL 8.0
 ```
+
+### 项目助手
+
+在工作台导航打开「项目助手」。它可以查选题、来源、文章和任务，查看脚本版本，选用或归档选题，以及发起抓取、生成或重试任务。页面实时显示工具执行状态、查到的记录数或实际入队的任务编号。资料卡尚未就绪时，脚本请求会先准备资料卡，完成后可在同一对话里继续生成。
+
+本地运行需要 Node.js 22.19 或以上。在项目根目录执行 `npm ci --prefix pi-agent --ignore-scripts`，配置 `.env` 后运行 `python app.py`。Docker 构建会安装 Pi 依赖。助手沿用设置页的模型与 `.env` 中的 `OPENAI_API_KEY`、`OPENAI_BASE_URL`，模型须支持 OpenAI Chat Completions 的流式工具调用。
+
+FastAPI 从浏览器接收消息和最近 12 条对话记录，由 Pi Agent Core 调用 `services/project_tools.py` 注册的工作台业务工具。生成操作进入现有 MySQL 任务队列。对话记录存于当前浏览器标签页，点击「新对话」可清空。
 
 ## 4. 项目结构
 

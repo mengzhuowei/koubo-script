@@ -32,13 +32,30 @@ class LLMClientTest(unittest.TestCase):
     @patch("services.llm.OpenAI")
     @patch("services.llm.get_api_key", return_value="test-key")
     def test_build_client_defaults_to_openai_base_url(self, _get_api_key, openai):
-        with patch.dict("os.environ", {}, clear=True):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.dict("repositories.settings_repo._model_env", {}, clear=True),
+        ):
             llm._build_client()
 
         openai.assert_called_once_with(
             api_key="test-key",
             base_url="https://api.openai.com/v1",
         )
+
+    @patch("services.llm.OpenAI")
+    @patch("repositories.settings_repo.get_llm_settings", return_value={})
+    def test_build_client_reads_model_credentials_from_dotenv(self, _get_settings, openai):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.dict("repositories.settings_repo._model_env", {
+                "OPENAI_API_KEY": "local-test-key",
+                "OPENAI_BASE_URL": "https://llm.example.com/v1",
+            }, clear=True),
+        ):
+            llm._build_client()
+
+        openai.assert_called_once_with(api_key="local-test-key", base_url="https://llm.example.com/v1")
 
     @patch("services.llm.OpenAI")
     @patch("services.llm.get_api_key", return_value="test-key")

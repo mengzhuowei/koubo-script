@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from typing import Any
 
 from openai import OpenAI
 
-from repositories.settings_repo import get_api_key, get_llm_settings, get_profile
+from repositories.settings_repo import get_api_key, get_llm_settings, get_openai_base_url, get_profile
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +28,7 @@ def _build_client() -> OpenAI:
     api_key = get_api_key()
     if not api_key:
         raise LLMError("未配置 API Key，请在 .env 中设置环境变量后再调用 LLM。")
-    base_url = os.environ.get("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
+    base_url = get_openai_base_url()
     if _client_cache and _client_cache[:2] == (api_key, base_url):
         return _client_cache[2]
     client = OpenAI(api_key=api_key, base_url=base_url)

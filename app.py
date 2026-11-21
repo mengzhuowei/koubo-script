@@ -4,8 +4,8 @@ import os
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -13,6 +13,7 @@ from config import BASE_DIR, settings
 from repositories.db import init_db
 from repositories.jobs_repo import recover_stale_jobs
 from repositories.settings_repo import ensure_defaults
+from services.project_chat import CHAT_STREAM_TYPE, ChatRequest, chat as project_chat, stream_chat
 from workers.job_runner import start_worker
 from workers.scheduler import start_scheduler, stop_scheduler
 
@@ -65,6 +66,23 @@ def dashboard(request: Request):
         "recent_jobs": list_recent_jobs(10),
     }
     return render(request, "dashboard.html", ctx)
+
+
+@app.get("/assistant", response_class=HTMLResponse)
+def assistant_page(request: Request):
+    return render(request, "assistant.html", {"active": "assistant"})
+
+
+@app.post("/assistant/chat")
+def assistant_chat(request: Request, payload: ChatRequest):
+    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+        raise HTTPException(status_code=415, detail="请求必须使用 JSON 格式。")
+    if CHAT_STREAM_TYPE in request.headers.get("accept", ""):
+        return StreamingResponse(
+            stream_chat(payload), media_type=CHAT_STREAM_TYPE,
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "Vary": "Accept"},
+        )
+    return project_chat(payload)
 
 
 # ---------- 来源库 ----------
@@ -359,30 +377,22 @@ def script_editor(request: Request, topic_id: int, job: int = 0):
 
 @app.post("/topics/{topic_id}/scripts")
 def script_generate(topic_id: int, platform: str = Form(...), format: str = Form(...), duration: int = Form(...)):
-    from repositories.jobs_repo import enqueue, list_active_jobs_by_type
-    from repositories.research_cards_repo import get_latest_card_for_topic, has_active_research_job
-    # 去重：同一选题已有进行中的生成任务则拒绝
-    active = list_active_jobs_by_type("generate_script")
-    for j in active:
-        p = j.get("payload") or {}
-        if p.get("topic_id") == topic_id:
-            from starlette.responses import HTMLResponse
-            return HTMLResponse(
-                "<html><body style='font-family:sans-serif;margin:40px;text-align:center'>"
-                "<h2>已有生成中的脚本</h2>"
-                "<p>该选题的脚本正在生成中，请等待完成后刷新。</p>"
-                f"<a href='/topics/{topic_id}/scripts' style='color:#0066cc'>← 返回脚本页</a>"
-                "</body></html>",
-                status_code=409,
-            )
-    # 脚本必须等待资料卡完成。旧逻辑在资料卡任务已运行时会继续入队脚本，
-    # 并发 worker 可能让脚本先执行，意外退化成“无资料卡”版本。
-    if not get_latest_card_for_topic(topic_id):
-        if not has_active_research_job(topic_id):
-            enqueue("generate_research_card", {"topic_id": topic_id})
-        return RedirectResponse(url=f"/topics/{topic_id}/scripts", status_code=303)
-    job_id = enqueue("generate_script", {"topic_id": topic_id, "platform": platform, "format": format, "duration": duration})
-    return RedirectResponse(url=f"/topics/{topic_id}/scripts?job={job_id}", status_code=303)
+    from services.script_jobs import request_script
+
+    state, job_id = request_script(topic_id, platform, format, duration)
+    target = f"/topics/{topic_id}/scripts"
+    if state == "script_active":
+        return HTMLResponse(
+            "<html><body style='font-family:sans-serif;margin:40px;text-align:center'>"
+            "<h2>已有生成中的脚本</h2>"
+            "<p>该选题的脚本正在生成中，请等待完成后刷新。</p>"
+            f"<a href='{target}' style='color:#0066cc'>← 返回脚本页</a>"
+            "</body></html>",
+            status_code=409,
+        )
+    if state == "script_queued":
+        target += f"?job={job_id}"
+    return RedirectResponse(url=target, status_code=303)
 
 
 @app.post("/scripts/{script_id}")

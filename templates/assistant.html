@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}项目助手 · 口播雷达{% endblock %}
+{% block content %}
+<section class="project-chat" aria-labelledby="assistant-title">
+  <header class="project-chat-header">
+    <div>
+      <h1 id="assistant-title">项目助手</h1>
+      <p>用对话查选题、生成脚本和跟进任务。</p>
+    </div>
+    <button type="button" class="btn" id="assistant-reset" disabled>新对话</button>
+  </header>
+
+  <div class="panel project-chat-panel">
+    <div class="project-chat-conversation" id="assistant-conversation">
+      <div class="project-chat-examples" id="assistant-examples">
+        <button type="button" class="btn" data-message="列出今天得分最高的 3 个选题">今天有哪些高分选题？</button>
+        <button type="button" class="btn" data-message="查一下最近失败的任务">最近有任务失败吗？</button>
+        <button type="button" class="btn" data-message="生成今日选题">生成今日选题</button>
+      </div>
+      <div id="assistant-messages" role="log" aria-label="对话消息"></div>
+    </div>
+    <form class="project-chat-form" id="assistant-form">
+      <label for="assistant-input">消息</label>
+      <div class="project-chat-composer">
+        <textarea id="assistant-input" rows="2" maxlength="2000" required placeholder="例如：把 12 号选题标为选用"></textarea>
+        <button class="btn btn-primary" id="assistant-send" type="submit">发送</button>
+      </div>
+      <p class="project-chat-status" id="assistant-status" role="status" hidden></p>
+    </form>
+  </div>
+</section>
+<script src="/static/assistant.js?v=2" defer></script>
+{% endblock %}

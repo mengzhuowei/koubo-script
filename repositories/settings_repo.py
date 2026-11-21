@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import os
 
+from dotenv import dotenv_values
+
 from config import settings as app_settings
 from repositories.db import get_conn
+
+_model_env = dotenv_values(".env")
 
 
 def _row(r):
@@ -103,12 +107,15 @@ def update_llm_settings(*, provider: str, model: str, temperature: float, max_to
 
 
 def is_api_key_configured() -> bool:
-    llm = get_llm_settings()
-    env_var = llm.get("api_key_env_var") or "OPENAI_API_KEY"
-    return bool(os.environ.get(env_var))
+    return bool(get_api_key())
 
 
 def get_api_key() -> str:
     llm = get_llm_settings()
     env_var = llm.get("api_key_env_var") or "OPENAI_API_KEY"
-    return os.environ.get(env_var, "")
+    return os.environ.get(env_var, _model_env.get(env_var) or "").strip()
+
+
+def get_openai_base_url() -> str:
+    base_url = os.environ.get("OPENAI_BASE_URL", _model_env.get("OPENAI_BASE_URL") or "")
+    return base_url.strip() or "https://api.openai.com/v1"
